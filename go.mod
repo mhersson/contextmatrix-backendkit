@@ -3,8 +3,8 @@ module github.com/mhersson/contextmatrix-backendkit
 go 1.26.5
 
 require (
-	github.com/mhersson/contextmatrix-harness v0.0.0-00010101000000-000000000000
-	github.com/mhersson/contextmatrix-protocol v0.0.0-00010101000000-000000000000
+	github.com/mhersson/contextmatrix-harness v0.14.0
+	github.com/mhersson/contextmatrix-protocol v0.14.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
 )
@@ -25,7 +25,3 @@ require (
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/mhersson/contextmatrix-protocol => ../contextmatrix-protocol
-
-replace github.com/mhersson/contextmatrix-harness => ../contextmatrix-harness
