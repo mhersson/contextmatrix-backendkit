@@ -58,8 +58,6 @@ func WriteError(w http.ResponseWriter, status int, code, msg string) {
 }
 
 // matchingTags returns the tags containing any of the filter substrings.
-//
-//nolint:unused // consumed by the images handler ported in webhookcore part 2.
 func matchingTags(tags, filters []string) []string {
 	out := make([]string, 0, len(tags))
 
