@@ -1,0 +1,160 @@
+package metrics_test
+
+import (
+	"runtime"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/mhersson/contextmatrix-backendkit/metrics"
+)
+
+var agentEndpoints = []string{
+	"/trigger", "/kill", "/stop-all", "/message", "/promote",
+	"/end-session", "/containers", "/logs", "/health", "/readyz", "/metrics",
+}
+
+var chatEndpoints = []string{
+	"/chat/start", "/chat/end", "/message", "/logs", "/health", "/readyz", "/metrics",
+}
+
+func TestNew_RegistersAllMetrics(t *testing.T) {
+	t.Run("agent", func(t *testing.T) {
+		m := metrics.New("cm_agent", agentEndpoints)
+		require.NotNil(t, m)
+
+		// Touch each collector so it appears in the registry output.
+		m.WebhookRequestsTotal.WithLabelValues("trigger", "200", "success").Inc()
+		m.WebhookRequestDuration.WithLabelValues("trigger").Observe(0.1)
+		m.ContainerDuration.WithLabelValues("success").Observe(30)
+		m.RunningContainers.Set(1)
+		m.BroadcasterDropsTotal.Inc()
+
+		families, err := m.Registry.Gather()
+		require.NoError(t, err)
+
+		got := make(map[string]bool, len(families))
+		for _, f := range families {
+			got[f.GetName()] = true
+		}
+
+		want := []string{
+			"cm_agent_webhook_requests_total",
+			"cm_agent_webhook_request_duration_seconds",
+			"cm_agent_container_duration_seconds",
+			"cm_agent_running_containers",
+			"cm_agent_broadcaster_drops_total",
+		}
+
+		for _, name := range want {
+			assert.True(t, got[name], "metric %q not registered", name)
+		}
+	})
+
+	t.Run("chat", func(t *testing.T) {
+		m := metrics.New("cm_chat", chatEndpoints)
+		require.NotNil(t, m)
+
+		// Touch each collector so it appears in the registry output.
+		m.WebhookRequestsTotal.WithLabelValues("message", "200", "success").Inc()
+		m.WebhookRequestDuration.WithLabelValues("message").Observe(0.1)
+		m.ContainerDuration.WithLabelValues("success").Observe(30)
+		m.RunningContainers.Set(1)
+		m.BroadcasterDropsTotal.Inc()
+
+		families, err := m.Registry.Gather()
+		require.NoError(t, err)
+
+		got := make(map[string]bool, len(families))
+		for _, f := range families {
+			got[f.GetName()] = true
+		}
+
+		want := []string{
+			"cm_chat_webhook_requests_total",
+			"cm_chat_webhook_request_duration_seconds",
+			"cm_chat_container_duration_seconds",
+			"cm_chat_running_containers",
+			"cm_chat_broadcaster_drops_total",
+		}
+
+		for _, name := range want {
+			assert.True(t, got[name], "metric %q not registered", name)
+		}
+	})
+}
+
+func TestNew_RegistersGoAndProcessCollectors(t *testing.T) {
+	m := metrics.New("cm_agent", agentEndpoints)
+	require.NotNil(t, m)
+
+	families, err := m.Registry.Gather()
+	require.NoError(t, err)
+
+	want := map[string]bool{
+		"go_goroutines":           false,
+		"go_memstats_alloc_bytes": false,
+	}
+
+	if runtime.GOOS == "linux" {
+		want["process_cpu_seconds_total"] = false
+		want["process_resident_memory_bytes"] = false
+	}
+
+	for _, f := range families {
+		if _, ok := want[f.GetName()]; ok {
+			want[f.GetName()] = true
+		}
+	}
+
+	for name, seen := range want {
+		assert.True(t, seen, "expected runtime/process series %q to be registered", name)
+	}
+}
+
+func TestNew_MultipleCallsUseIsolatedRegistries(t *testing.T) {
+	m1 := metrics.New("cm_chat", chatEndpoints)
+	m2 := metrics.New("cm_chat", chatEndpoints)
+
+	assert.NotSame(t, m1.Registry, m2.Registry)
+
+	m1.BroadcasterDropsTotal.Inc()
+
+	_, err := m1.Registry.Gather()
+	require.NoError(t, err)
+	_, err = m2.Registry.Gather()
+	require.NoError(t, err)
+}
+
+func TestNormalizeEndpoint(t *testing.T) {
+	t.Run("agent", func(t *testing.T) {
+		m := metrics.New("cm_agent", agentEndpoints)
+
+		for _, p := range agentEndpoints {
+			assert.Equal(t, p, m.NormalizeEndpoint(p), "allowlisted path %q must round-trip", p)
+		}
+
+		unknown := []string{"/nonexistent", "/trigger/extra", "", "/", "/TRIGGER"}
+		for _, p := range unknown {
+			assert.Equal(t, "other", m.NormalizeEndpoint(p), "unknown path %q must collapse", p)
+		}
+	})
+
+	t.Run("chat", func(t *testing.T) {
+		m := metrics.New("cm_chat", chatEndpoints)
+
+		for _, p := range chatEndpoints {
+			assert.Equal(t, p, m.NormalizeEndpoint(p), "allowlisted path %q must round-trip", p)
+		}
+
+		// Agent task routes that are NOT in the chat allowlist must collapse.
+		unknown := []string{
+			"/nonexistent", "/trigger/extra", "", "/", "/TRIGGER",
+			"/trigger", "/kill", "/stop-all", "/promote", "/end-session", "/containers",
+		}
+		for _, p := range unknown {
+			assert.Equal(t, "other", m.NormalizeEndpoint(p), "unknown path %q must collapse", p)
+		}
+	})
+}
