@@ -227,3 +227,71 @@ func TestDrainGate_503WhenDraining(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, w2.Code)
 	assert.Contains(t, w2.Body.String(), protocol.CodeDraining)
 }
+
+func TestAdminAuth_BearerTokenPasses(t *testing.T) {
+	c := NewCore(CoreConfig{APIKey: testAPIKey, MetricsToken: "scrape-token"})
+
+	var ran bool
+
+	h := c.AdminAuth(echoHandler(&ran))
+
+	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	r.Header.Set("Authorization", "Bearer scrape-token")
+
+	w := httptest.NewRecorder()
+	h(w, r)
+
+	assert.True(t, ran)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestAdminAuth_WrongBearerRejected(t *testing.T) {
+	c := NewCore(CoreConfig{APIKey: testAPIKey, MetricsToken: "scrape-token"})
+
+	var ran bool
+
+	h := c.AdminAuth(echoHandler(&ran))
+
+	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	r.Header.Set("Authorization", "Bearer wrong")
+
+	w := httptest.NewRecorder()
+	h(w, r)
+
+	assert.False(t, ran)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}
+
+func TestAdminAuth_HMACStillPassesWithTokenConfigured(t *testing.T) {
+	c := NewCore(CoreConfig{APIKey: testAPIKey, MetricsToken: "scrape-token"})
+
+	var ran bool
+
+	h := c.AdminAuth(echoHandler(&ran))
+
+	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	signReq(t, r, testAPIKey, nil, nowTS())
+
+	w := httptest.NewRecorder()
+	h(w, r)
+
+	assert.True(t, ran)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestAdminAuth_BearerRejectedWhenNoTokenConfigured(t *testing.T) {
+	c := NewCore(CoreConfig{APIKey: testAPIKey})
+
+	var ran bool
+
+	h := c.AdminAuth(echoHandler(&ran))
+
+	r := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	r.Header.Set("Authorization", "Bearer scrape-token")
+
+	w := httptest.NewRecorder()
+	h(w, r)
+
+	assert.False(t, ran)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+}

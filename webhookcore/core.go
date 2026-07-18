@@ -2,8 +2,10 @@ package webhookcore
 
 import (
 	"context"
+	"crypto/subtle"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,7 +42,14 @@ type ImageSummary struct {
 // be shared with the serve layer; Core does not take ownership of their
 // lifecycles.
 type CoreConfig struct {
-	APIKey            string
+	APIKey string
+
+	// MetricsToken, when non-empty, is a static bearer token AdminAuth accepts
+	// as an alternative to the signed-GET HMAC, so scrapers that cannot sign
+	// requests (Prometheus) can authenticate. Empty keeps the admin surface
+	// HMAC-only.
+	MetricsToken string
+
 	Skew              time.Duration    // 0 -> protocol.DefaultMaxClockSkew
 	Replay            *ReplayCache     // nil -> NewReplayCache(skew, 4096)
 	Draining          *atomic.Bool     // nil -> new
@@ -61,8 +70,9 @@ type CoreConfig struct {
 // stream, and the health/readiness/images probes. It owns no goroutines beyond
 // the ones its handlers spawn; the replay janitor lives in its owner.
 type Core struct {
-	apiKey string
-	skew   time.Duration
+	apiKey       string
+	metricsToken string
+	skew         time.Duration
 
 	replay   *ReplayCache
 	draining *atomic.Bool
@@ -117,6 +127,7 @@ func NewCore(cfg CoreConfig) *Core {
 
 	return &Core{
 		apiKey:            cfg.APIKey,
+		metricsToken:      cfg.MetricsToken,
 		skew:              skew,
 		replay:            replay,
 		draining:          draining,
@@ -140,10 +151,23 @@ func (c *Core) CloseSSE() {
 	c.sseShutdownOnce.Do(func() { close(c.sseShutdown) })
 }
 
-// AdminAuth exposes the HMAC verifier for the admin /metrics endpoint, which the
-// serve layer mounts on a separate loopback listener. It reuses the same
-// signed-GET verification, replay cache, and skew as the webhook routes - the
-// signed-GET HMAC is real auth, preserved here.
+// AdminAuth guards the admin /metrics endpoint, which the serve layer mounts on
+// a separate listener. It accepts the same signed-GET HMAC as the webhook
+// routes and, when MetricsToken is configured, a static bearer token so
+// scrapers that cannot sign requests (Prometheus) can authenticate. A bearer
+// mismatch falls through to HMAC verification, so the failure response is the
+// same fixed 401 either way.
 func (c *Core) AdminAuth(next http.HandlerFunc) http.HandlerFunc {
-	return c.Auth(next)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if c.metricsToken != "" {
+			token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if ok && subtle.ConstantTimeCompare([]byte(token), []byte(c.metricsToken)) == 1 {
+				next(w, r)
+
+				return
+			}
+		}
+
+		c.Auth(next)(w, r)
+	}
 }
