@@ -44,6 +44,7 @@ type Bridge struct {
 	redactor             atomic.Pointer[redact.Redactor]
 	onAwaiting           func(key Key, awaiting bool)
 	surfaceAwaitingHuman bool
+	surfaceRunState      bool
 	mapExtra             func(kind string, data map[string]any) (entry protocol.LogEntry, awaiting, ok bool)
 }
 
@@ -52,12 +53,19 @@ type Bridge struct {
 // nil OnAwaiting never fires. SurfaceAwaitingHuman decides whether an
 // awaiting_human state change becomes a system entry that arms the flag (agent)
 // or is skipped entirely (chat). MapExtra classifies event kinds the shared
-// switch does not handle and is tried before the default skip.
+// switch does not handle and is tried before the default skip. SurfaceRunState
+// maps run-state events onto ephemeral "status" frames instead of dropping them:
+// user_input and model_request become {Type: "status", Content: "working"} and
+// the awaiting_human state change becomes {Type: "status", Content: "idle"}.
+// Off by default; the chat backend enables it so CM can drive a working
+// indicator. On awaiting_human, SurfaceAwaitingHuman takes precedence when both
+// are set.
 type BridgeConfig struct {
 	Hub                  *Hub
 	Redactor             *redact.Redactor
 	OnAwaiting           func(key Key, awaiting bool)
 	SurfaceAwaitingHuman bool
+	SurfaceRunState      bool
 	MapExtra             func(kind string, data map[string]any) (entry protocol.LogEntry, awaiting, ok bool)
 }
 
@@ -67,6 +75,7 @@ func NewBridge(cfg BridgeConfig) *Bridge {
 		hub:                  cfg.Hub,
 		onAwaiting:           cfg.OnAwaiting,
 		surfaceAwaitingHuman: cfg.SurfaceAwaitingHuman,
+		surfaceRunState:      cfg.SurfaceRunState,
 		mapExtra:             cfg.MapExtra,
 	}
 	b.redactor.Store(cfg.Redactor)
@@ -188,6 +197,10 @@ func (b *Bridge) mapEvent(kind string, data map[string]any) (entry protocol.LogE
 				}, true, false
 			}
 
+			if b.surfaceRunState {
+				return protocol.LogEntry{Type: "status", Content: "idle"}, false, false
+			}
+
 			// Normal idle between chat turns - not a transcript entry.
 			return protocol.LogEntry{}, false, true
 		}
@@ -209,8 +222,15 @@ func (b *Bridge) mapEvent(kind string, data map[string]any) (entry protocol.LogE
 			Content: strField(data, "error"),
 		}, false, false
 
+	case "model_request", "user_input":
+		if b.surfaceRunState {
+			return protocol.LogEntry{Type: "status", Content: "working"}, false, false
+		}
+
+		return protocol.LogEntry{}, false, true
+
 	// Transcript-only kinds - not bridged.
-	case "model_request", "tool_result", "tool_repair", "user_input", "verification":
+	case "tool_result", "tool_repair", "verification":
 		return protocol.LogEntry{}, false, true
 
 	default:
