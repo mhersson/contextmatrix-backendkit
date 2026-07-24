@@ -431,6 +431,91 @@ func TestMappingTable(t *testing.T) {
 	})
 }
 
+// TestRunStateMapping pins the SurfaceRunState contract: run-state events that
+// are dropped by default become ephemeral "status" frames when the flag is set,
+// so a chat-mode consumer can drive a working indicator. The default-off rows
+// are already pinned by TestMappingTable's chat mode.
+func TestRunStateMapping(t *testing.T) {
+	t.Parallel()
+
+	rows := []struct {
+		name        string
+		line        []byte
+		wantContent string
+	}{
+		{
+			name:        "user_input → status working",
+			line:        makeEvent("user_input", map[string]any{"message_id": "m1"}),
+			wantContent: "working",
+		},
+		{
+			name:        "model_request → status working",
+			line:        makeEvent("model_request", map[string]any{"turn": float64(1)}),
+			wantContent: "working",
+		},
+		{
+			name: "awaiting_human → status idle",
+			line: makeEvent("state_change", map[string]any{
+				"state": "awaiting_human",
+				"turns": float64(3),
+			}),
+			wantContent: "idle",
+		},
+	}
+
+	for _, tt := range rows {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			hub := logbridge.NewHub(func(e protocol.LogEntry) string { return e.SessionID }, nil)
+			_, ch := hub.Subscribe("")
+			bridge := logbridge.NewBridge(logbridge.BridgeConfig{Hub: hub, SurfaceRunState: true})
+
+			bridge.BridgeLine(logbridge.Key{SessionID: testSession}, tt.line, false)
+
+			var got protocol.LogEntry
+			select {
+			case got = <-ch:
+			case <-time.After(100 * time.Millisecond):
+				t.Fatal("expected a status frame but got none (timeout)")
+			}
+
+			assert.Equal(t, "status", got.Type)
+			assert.Equal(t, tt.wantContent, got.Content)
+			assert.Equal(t, testSession, got.SessionID)
+			assert.False(t, got.Timestamp.IsZero())
+		})
+	}
+}
+
+// TestRunStateDoesNotOverrideAwaitingHuman pins the precedence rule: when both
+// SurfaceAwaitingHuman and SurfaceRunState are set (not a real deployment
+// config), the agent's awaiting_human system entry wins.
+func TestRunStateDoesNotOverrideAwaitingHuman(t *testing.T) {
+	t.Parallel()
+
+	hub := logbridge.NewHub(func(e protocol.LogEntry) string { return e.Project }, nil)
+	_, ch := hub.Subscribe("")
+	bridge := logbridge.NewBridge(logbridge.BridgeConfig{
+		Hub:                  hub,
+		SurfaceAwaitingHuman: true,
+		SurfaceRunState:      true,
+	})
+
+	bridge.BridgeLine(logbridge.Key{Project: testProject},
+		makeEvent("state_change", map[string]any{"state": "awaiting_human"}), false)
+
+	var got protocol.LogEntry
+	select {
+	case got = <-ch:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected an entry (timeout)")
+	}
+
+	assert.Equal(t, "system", got.Type)
+	assert.Equal(t, "awaiting human input", got.Content)
+}
+
 // TestStderrStream verifies that isStderr=true produces a stderr frame with
 // the raw line redacted and stamped with the key.
 func TestStderrStream(t *testing.T) {
