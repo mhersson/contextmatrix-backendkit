@@ -3,7 +3,7 @@ module github.com/mhersson/contextmatrix-backendkit
 go 1.26.6
 
 require (
-	github.com/mhersson/contextmatrix-harness v0.15.0
+	github.com/mhersson/contextmatrix-harness v0.16.0
 	github.com/mhersson/contextmatrix-protocol v0.16.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/stretchr/testify v1.11.1
