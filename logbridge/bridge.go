@@ -217,9 +217,14 @@ func (b *Bridge) mapEvent(kind string, data map[string]any) (entry protocol.LogE
 		}, false, false
 
 	case "error":
+		content := strField(data, "error")
+		if defect := strField(data, "suspected_upstream_defect"); defect != "" {
+			content += " (suspected upstream defect: " + defect + ")"
+		}
+
 		return protocol.LogEntry{
 			Type:    "stderr",
-			Content: strField(data, "error"),
+			Content: content,
 		}, false, false
 
 	case "model_request", "user_input":

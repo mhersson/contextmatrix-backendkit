@@ -229,6 +229,32 @@ func sharedRows() []mapRow {
 			},
 		},
 		{
+			name: "error with suspected_upstream_defect → stderr with defect note",
+			line: makeEvent("error", map[string]any{
+				"error":                     "model cannot drive the tool loop",
+				"suspected_upstream_defect": "concatenated objects",
+			}),
+			wantType:     "stderr",
+			wantAwaiting: -1,
+			checkContent: func(t *testing.T, content string) {
+				t.Helper()
+				assert.Equal(t, "model cannot drive the tool loop (suspected upstream defect: concatenated objects)", content)
+			},
+		},
+		{
+			name: "error with empty suspected_upstream_defect → bare error string",
+			line: makeEvent("error", map[string]any{
+				"error":                     "model cannot drive the tool loop",
+				"suspected_upstream_defect": "",
+			}),
+			wantType:     "stderr",
+			wantAwaiting: -1,
+			checkContent: func(t *testing.T, content string) {
+				t.Helper()
+				assert.Equal(t, "model cannot drive the tool loop", content)
+			},
+		},
+		{
 			name:         "model_request → skipped",
 			line:         makeEvent("model_request", map[string]any{"turn": float64(1)}),
 			wantType:     "",
