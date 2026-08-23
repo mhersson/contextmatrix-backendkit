@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -193,6 +194,81 @@ func TestResolveDoesNotCacheFailure(t *testing.T) {
 
 			_, err = r.Resolve(context.Background())
 			require.NoError(t, err, "a prior failure is not cached; the next call retries")
+		})
+	}
+}
+
+// TestResolveDetachedFromCallerContext pins that Resolve runs the pointer fetch
+// and clone on a context detached from the caller's cancellation, with its own
+// bounded deadline. A caller disconnecting mid-clone must not abort the clone;
+// the result must still be cached on success.
+func TestResolveDetachedFromCallerContext(t *testing.T) {
+	for _, path := range endpointPaths {
+		t.Run(path, func(t *testing.T) {
+			cloneStarted := make(chan struct{})
+			cloneProceed := make(chan struct{})
+
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"git_remote_url": "https://example.test/skills.git",
+					"ref":            "abc123",
+					"token":          "tok",
+				})
+			}))
+			defer srv.Close()
+
+			r := NewResolver(srv.URL, "key", t.TempDir(), path)
+			r.cloner = func(ctx context.Context, _, _, _, _ string) error {
+				// The derived context must have a bounded deadline.
+				deadline, ok := ctx.Deadline()
+				assert.True(t, ok, "clone context must have a deadline")
+				assert.True(t, deadline.After(time.Now()), "clone deadline must be in the future")
+
+				// Signal that the clone has started.
+				close(cloneStarted)
+				// Block until the test tells us to proceed.
+				<-cloneProceed
+
+				// The context must still be alive (not cancelled).
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
+
+				return nil
+			}
+
+			callerCtx, callerCancel := context.WithCancel(context.Background())
+			defer callerCancel()
+
+			type result struct {
+				dir string
+				err error
+			}
+
+			resCh := make(chan result, 1)
+
+			go func() {
+				dir, err := r.Resolve(callerCtx)
+				resCh <- result{dir, err}
+			}()
+
+			// Wait for the clone to start, then cancel the caller's context.
+			<-cloneStarted
+			callerCancel()
+
+			// Now unblock the clone.
+			close(cloneProceed)
+
+			res := <-resCh
+			require.NoError(t, res.err)
+			assert.NotEmpty(t, res.dir)
+
+			// Second call returns the cached result.
+			dir2, err := r.Resolve(context.Background())
+			require.NoError(t, err)
+			assert.Equal(t, res.dir, dir2)
 		})
 	}
 }
