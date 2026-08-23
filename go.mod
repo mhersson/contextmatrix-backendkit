@@ -1,6 +1,6 @@
 module github.com/mhersson/contextmatrix-backendkit
 
-go 1.26.6
+go 1.26.7
 
 require (
 	github.com/mhersson/contextmatrix-harness v0.16.0
