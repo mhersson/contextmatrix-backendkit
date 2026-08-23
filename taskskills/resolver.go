@@ -21,7 +21,10 @@ import (
 	protocol "github.com/mhersson/contextmatrix-protocol"
 )
 
-const requestTimeout = 15 * time.Second
+const (
+	requestTimeout = 15 * time.Second
+	cloneTimeout   = 5 * time.Minute
+)
 
 // Resolver fetches the task-skills pointer from CM and clones it once, caching
 // the resolved host dir for the process. The clone authenticates with the
@@ -61,7 +64,10 @@ func NewResolver(cmURL, apiKey, cacheDir, endpointPath string) *Resolver {
 
 // Resolve returns the host dir holding the task-skills, cloning on first use and
 // caching the result. An error means "no skills this run"; failures are not
-// cached, so the next trigger retries.
+// cached, so a subsequent retry still works. The pointer fetch and git clone
+// run detached from the caller under their own bounded deadline (cloneTimeout)
+// so a caller disconnecting or timing out cannot abort a clone that is making
+// progress.
 func (r *Resolver) Resolve(ctx context.Context) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -70,7 +76,10 @@ func (r *Resolver) Resolve(ctx context.Context) (string, error) {
 		return r.resolved, nil
 	}
 
-	p, err := r.fetchPointer(ctx)
+	resolveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cloneTimeout)
+	defer cancel()
+
+	p, err := r.fetchPointer(resolveCtx)
 	if err != nil {
 		return "", err
 	}
@@ -99,7 +108,7 @@ func (r *Resolver) Resolve(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("clear skills cache: %w", err)
 	}
 
-	if err := r.cloner(ctx, gitURL, ref, dest, token); err != nil {
+	if err := r.cloner(resolveCtx, gitURL, ref, dest, token); err != nil {
 		return "", fmt.Errorf("clone task-skills: %w", err)
 	}
 
