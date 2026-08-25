@@ -191,6 +191,28 @@ func sharedRows() []mapRow {
 			},
 		},
 		{
+			name: "usage → cache buckets are carried, not dropped",
+			line: makeEvent("usage", map[string]any{
+				"prompt_tokens":         float64(100),
+				"completion_tokens":     float64(50),
+				"cache_read_tokens":     float64(800),
+				"cache_creation_tokens": float64(40),
+				"model":                 "usage-model",
+			}),
+			wantType:     "usage",
+			wantModel:    "usage-model",
+			wantAwaiting: 0,
+			// The harness reports disjoint buckets: prompt_tokens excludes the
+			// cached portion. Dropping the cache fields makes a consumer that sums
+			// them - CM's chat context gauge - read a fraction of the true prompt.
+			wantUsage: &protocol.LogTokenUsage{
+				InputTokens:       100,
+				OutputTokens:      50,
+				CacheReadTokens:   800,
+				CacheCreateTokens: 40,
+			},
+		},
+		{
 			name: "state_change other → system + awaiting=false",
 			line: makeEvent("state_change", map[string]any{
 				"stop":  "done",
@@ -323,6 +345,8 @@ func assertCommon(t *testing.T, tt mapRow, got protocol.LogEntry) {
 		require.NotNil(t, got.Usage)
 		assert.Equal(t, tt.wantUsage.InputTokens, got.Usage.InputTokens)
 		assert.Equal(t, tt.wantUsage.OutputTokens, got.Usage.OutputTokens)
+		assert.Equal(t, tt.wantUsage.CacheReadTokens, got.Usage.CacheReadTokens)
+		assert.Equal(t, tt.wantUsage.CacheCreateTokens, got.Usage.CacheCreateTokens)
 	}
 
 	if tt.checkContent != nil {
