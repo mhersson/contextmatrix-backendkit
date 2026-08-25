@@ -176,15 +176,23 @@ func (b *Bridge) mapEvent(kind string, data map[string]any) (entry protocol.LogE
 		}, false, false
 
 	case "usage":
+		// The four counts are disjoint: prompt_tokens excludes the cached portion,
+		// which arrives in its own buckets. Dropping the cache fields makes a
+		// consumer that sums them - CM's chat context gauge and its cost line -
+		// read a fraction of the true prompt on any cached turn.
 		inputTokens := int64Field(data, "prompt_tokens")
 		outputTokens := int64Field(data, "completion_tokens")
+		cacheReadTokens := int64Field(data, "cache_read_tokens")
+		cacheCreateTokens := int64Field(data, "cache_creation_tokens")
 
 		return protocol.LogEntry{
 			Type:  "usage",
 			Model: strField(data, "model"),
 			Usage: &protocol.LogTokenUsage{
-				InputTokens:  inputTokens,
-				OutputTokens: outputTokens,
+				InputTokens:       inputTokens,
+				OutputTokens:      outputTokens,
+				CacheReadTokens:   cacheReadTokens,
+				CacheCreateTokens: cacheCreateTokens,
 			},
 		}, false, false
 
