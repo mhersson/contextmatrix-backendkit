@@ -167,7 +167,15 @@ func (b *Bridge) mapEvent(kind string, data map[string]any) (entry protocol.LogE
 		name := strField(data, "name")
 		args := strField(data, "raw_args")
 
-		content := truncate(name+"("+args+")", 200)
+		content := name + "(" + args + ")"
+		if dispatched, ok := data["dispatched"].(bool); ok && !dispatched {
+			// Interrupt or post-terminal skip: the harness paired this with a
+			// tool_result but never actually ran the call. Say so - a bare
+			// name() would read as executed.
+			content += " [not run - the turn ended first]"
+		}
+
+		content = truncate(content, 200)
 
 		return protocol.LogEntry{
 			Type:      "tool_call",
