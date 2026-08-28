@@ -1,6 +1,7 @@
 package logbridge_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -117,4 +118,122 @@ func TestRedactorRegistry_MultipleSessionKeysBothMasked(t *testing.T) {
 	got = recvEntry(t, ch)
 	assert.Contains(t, got.Content, llmKey, "removal must forget both keys, not just the last one")
 	assert.Contains(t, got.Content, gitBearer, "removal must forget both keys, not just the last one")
+}
+
+// TestRedactorRegistry_RedactLineLifecycle covers the secondary-sink use case:
+// RedactLine applies the registry's composed redactor to a caller-supplied
+// line, tracking the same lifecycle the bridge path does - unmasked before
+// registration, masked while registered, unmasked after removal.
+func TestRedactorRegistry_RedactLineLifecycle(t *testing.T) {
+	t.Parallel()
+
+	const sessionKey = "sk-session-provisioned-222222"
+
+	hub := logbridge.NewHub(sessionKeyOf, nil)
+	bridge := logbridge.NewBridge(logbridge.BridgeConfig{Hub: hub})
+	registry := logbridge.NewRedactorRegistry(bridge)
+
+	// Before registration the key passes through unmasked.
+	got := registry.RedactLine("boot " + sessionKey)
+	assert.Contains(t, got, sessionKey,
+		"an unregistered session key must not be masked yet")
+
+	// After registration the key is masked without going through the bridge.
+	registry.AddSessionKey(testSession, sessionKey)
+	got = registry.RedactLine("leaked " + sessionKey)
+	assert.NotContains(t, got, sessionKey,
+		"a registered session key must be masked by RedactLine")
+	assert.Contains(t, got, "[REDACTED]")
+
+	// After removal the same value passes through unmasked again.
+	registry.RemoveSessionKey(testSession)
+	got = registry.RedactLine("ended " + sessionKey)
+	assert.Contains(t, got, sessionKey,
+		"a session key must no longer be masked after removal")
+}
+
+// TestRedactorRegistry_RedactLineEmptyKeyIgnored verifies the empty-key rule
+// carries over to RedactLine: AddSessionKey with an empty key is ignored so
+// nothing is masked, and removing an unregistered session is a no-op.
+func TestRedactorRegistry_RedactLineEmptyKeyIgnored(t *testing.T) {
+	t.Parallel()
+
+	hub := logbridge.NewHub(sessionKeyOf, nil)
+	bridge := logbridge.NewBridge(logbridge.BridgeConfig{Hub: hub})
+	registry := logbridge.NewRedactorRegistry(bridge)
+
+	registry.AddSessionKey(testSession, "")
+	got := registry.RedactLine("plain line")
+	assert.Equal(t, "plain line", got,
+		"an empty key must not register any masking")
+
+	registry.RemoveSessionKey(testSession) // unregistered -> no-op, must not panic
+	assert.Equal(t, "plain line", registry.RedactLine("plain line"),
+		"a session with no registered key must not mask anything")
+}
+
+// TestRedactorRegistry_RedactLineShortKeyIgnored verifies the minimum-length
+// rule carries over to RedactLine: redact.New ignores secrets shorter than six
+// bytes, so a registered short key must not register any masking.
+func TestRedactorRegistry_RedactLineShortKeyIgnored(t *testing.T) {
+	t.Parallel()
+
+	hub := logbridge.NewHub(sessionKeyOf, nil)
+	bridge := logbridge.NewBridge(logbridge.BridgeConfig{Hub: hub})
+	registry := logbridge.NewRedactorRegistry(bridge)
+
+	registry.AddSessionKey(testSession, "abc")
+	// Called inside the registered window: a normal key would be masked here
+	// (see RedactLineLifecycle), so an unchanged line can only mean the short
+	// key was dropped at registration time.
+	got := registry.RedactLine("line with abc")
+	assert.Equal(t, "line with abc", got,
+		"a key shorter than the redact minimum must not register any masking")
+
+	registry.RemoveSessionKey(testSession) // unregistered -> no-op, must not panic
+	assert.Equal(t, "line with abc", registry.RedactLine("line with abc"),
+		"a session with no registered key must not mask anything")
+}
+
+// TestRedactorRegistry_RedactLineConcurrentWithRebuild exercises RedactLine
+// against parallel AddSessionKey/RemoveSessionKey rebuilds. Every result must
+// be a well-formed output of either the old or the new redactor: the secret is
+// masked once registered and unmasked only after its removal completes, with
+// no torn output or panic.
+func TestRedactorRegistry_RedactLineConcurrentWithRebuild(t *testing.T) {
+	t.Parallel()
+
+	const sessionKey = "sk-session-provisioned-333333"
+
+	line := "stderr panic: leaked " + sessionKey
+
+	hub := logbridge.NewHub(sessionKeyOf, nil)
+	bridge := logbridge.NewBridge(logbridge.BridgeConfig{Hub: hub})
+	registry := logbridge.NewRedactorRegistry(bridge)
+
+	var wg sync.WaitGroup
+
+	for range 4 {
+		wg.Go(func() {
+			for range 200 {
+				got := registry.RedactLine(line)
+				switch got {
+				case line:
+					// Old redactor (before registration or after removal).
+				default:
+					assert.Equal(t, "stderr panic: leaked [REDACTED]", got,
+						"masked output must be a well-formed result of the new redactor")
+				}
+			}
+		})
+	}
+
+	for range 20 {
+		wg.Go(func() {
+			registry.AddSessionKey(testSession, sessionKey)
+			registry.RemoveSessionKey(testSession)
+		})
+	}
+
+	wg.Wait()
 }

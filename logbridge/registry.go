@@ -2,6 +2,7 @@ package logbridge
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/mhersson/contextmatrix-harness/redact"
 )
@@ -24,7 +25,8 @@ import (
 // redactor, so a concurrent add/remove for different sessions cannot clobber
 // each other. Safe for concurrent use.
 type RedactorRegistry struct {
-	bridge *Bridge
+	bridge   *Bridge
+	redactor atomic.Pointer[redact.Redactor]
 
 	mu      sync.Mutex
 	session map[string][]string
@@ -86,5 +88,17 @@ func (r *RedactorRegistry) rebuild() {
 		all = append(all, keys...)
 	}
 
-	r.bridge.SetRedactor(redact.New(all))
+	redactor := redact.New(all)
+	r.redactor.Store(redactor)
+	r.bridge.SetRedactor(redactor)
+}
+
+// RedactLine applies the registry's current composed redactor to line and
+// returns the redacted result, so one redaction source of truth covers every
+// sink a consumer writes - not just the SSE bridge but also secondary sinks
+// such as a durable file log routed alongside it. Safe for concurrent use with
+// AddSessionKey and RemoveSessionKey: a call concurrent with a rebuild applies
+// either the old or the new redactor, never a torn one.
+func (r *RedactorRegistry) RedactLine(line string) string {
+	return r.redactor.Load().Apply(line)
 }
