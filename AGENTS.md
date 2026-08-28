@@ -36,7 +36,7 @@ themselves, never here.
 ## Verification
 
 ```bash
-go fix ./... && make fmt && make test && make test-race && make lint && make deps-gate && make build
+make fmt && make test && make test-race && make lint && make deps-gate && make build
 ```
 
 ## Documentation
@@ -51,11 +51,15 @@ go fix ./... && make fmt && make test && make test-race && make lint && make dep
 Run before every commit:
 
 ```bash
-go fix ./...   # adopt modern stdlib idioms
 make test      # clean
 make lint      # clean
 make build     # builds
 ```
+
+Never run `go fix ./...` here: a Go toolchain newer than go.mod rewrites
+idioms (errors.AsType, WaitGroup.Go, strings.SplitSeq) that the module's
+declared version cannot build in CI. Adopting new idioms is a deliberate,
+separate change: bump go.mod first, then run go fix as its own commit.
 
 - **Never commit without explicit user approval.** No exceptions.
 - Conventional commits: `type(scope): concise summary`. Always include a scope.
