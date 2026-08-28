@@ -161,6 +161,35 @@ func sharedRows() []mapRow {
 			},
 		},
 		{
+			name: "tool_call dispatched:false → annotated as not run, no bare call",
+			line: makeEvent("tool_call", map[string]any{
+				"id":         "call_skip",
+				"name":       "write_file",
+				"dispatched": false,
+			}),
+			wantType:     "tool_call",
+			wantToolID:   "call_skip",
+			wantAwaiting: 0,
+			checkContent: func(t *testing.T, content string) {
+				t.Helper()
+				assert.Equal(t, "write_file() [not run - the turn ended first]", content)
+			},
+		},
+		{
+			name: "tool_call without raw_args and without dispatched field → byte-identical bare call",
+			line: makeEvent("tool_call", map[string]any{
+				"id":   "call_bare",
+				"name": "bash",
+			}),
+			wantType:     "tool_call",
+			wantToolID:   "call_bare",
+			wantAwaiting: 0,
+			checkContent: func(t *testing.T, content string) {
+				t.Helper()
+				assert.Equal(t, "bash()", content)
+			},
+		},
+		{
 			name: "state_change summary truncation is rune-safe on multi-byte content",
 			line: makeEvent("state_change", map[string]any{
 				// "世" is 3 bytes; the JSON prefix `{"warning":"` is 12 bytes,
