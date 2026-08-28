@@ -56,11 +56,6 @@ make lint      # clean
 make build     # builds
 ```
 
-Never run `go fix ./...` here: a Go toolchain newer than go.mod rewrites
-idioms (errors.AsType, WaitGroup.Go, strings.SplitSeq) that the module's
-declared version cannot build in CI. Adopting new idioms is a deliberate,
-separate change: bump go.mod first, then run go fix as its own commit.
-
 - **Never commit without explicit user approval.** No exceptions.
 - Conventional commits: `type(scope): concise summary`. Always include a scope.
 - Body uses bullet points for the what and why - no long paragraphs.
