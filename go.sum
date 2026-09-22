@@ -8,8 +8,8 @@ github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/mhersson/contextmatrix-harness v0.20.0 h1:DV9irvFNqzYV7FtqmPBGrb6hwYBmmWNrA1KIEzU/3tY=
 github.com/mhersson/contextmatrix-harness v0.20.0/go.mod h1:+tbo9tmokwEDSxRnAVEbmGv4bvyZZxe+4WN2m2KsVrE=
-github.com/mhersson/contextmatrix-protocol v0.17.0 h1:qOIEf3NYr2Fr6eWtw7DcO+YGSjLVq9wybWKInHWmaV8=
-github.com/mhersson/contextmatrix-protocol v0.17.0/go.mod h1:Je4jQj+MkbkjhYuUYmWjJca2Mjj4inJKBq9DiNvhJ38=
+github.com/mhersson/contextmatrix-protocol v0.20.0 h1:CY7Vxzb7/149PMs+rh+MjyYkGsqm1+KtwFLwYxgTOyk=
+github.com/mhersson/contextmatrix-protocol v0.20.0/go.mod h1:92sMaRLgbic9fxJcIEiwf0paqUDHoWiRwV7oFOoRsxc=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
 github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
 github.com/prometheus/client_golang v1.24.1 h1:JnJkREXzWxUdCuPFpIWZiPispT9xVV59uiuyR2bPlnU=
