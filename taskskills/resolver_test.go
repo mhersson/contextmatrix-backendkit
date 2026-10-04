@@ -26,10 +26,10 @@ var endpointPaths = []string{
 func TestResolveFetchesPointerClonesAndCaches(t *testing.T) {
 	for _, path := range endpointPaths {
 		t.Run(path, func(t *testing.T) {
-			var hits int32
+			var hits atomic.Int32
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				atomic.AddInt32(&hits, 1)
+				hits.Add(1)
 				assert.Equal(t, path, r.URL.Path)
 				assert.NotEmpty(t, r.Header.Get("X-Signature-256"), "the GET is HMAC-signed")
 
@@ -64,7 +64,7 @@ func TestResolveFetchesPointerClonesAndCaches(t *testing.T) {
 			dir2, err := r.Resolve(context.Background())
 			require.NoError(t, err)
 			assert.Equal(t, dir, dir2)
-			assert.Equal(t, int32(1), atomic.LoadInt32(&hits), "pointer fetched once; result cached")
+			assert.Equal(t, int32(1), hits.Load(), "pointer fetched once; result cached")
 		})
 	}
 }
@@ -168,10 +168,10 @@ func TestGitCloneRejectsDashLeadingRefBeforeExec(t *testing.T) {
 func TestResolveDoesNotCacheFailure(t *testing.T) {
 	for _, path := range endpointPaths {
 		t.Run(path, func(t *testing.T) {
-			var hits int32
+			var hits atomic.Int32
 
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				n := atomic.AddInt32(&hits, 1)
+				n := hits.Add(1)
 				if n == 1 {
 					w.WriteHeader(http.StatusInternalServerError)
 
