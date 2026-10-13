@@ -1,13 +1,10 @@
 # contextmatrix-backendkit
 
 Shared serve plumbing for the two ContextMatrix execution backends,
-`contextmatrix-agent` and `contextmatrix-chat`. Both backends run a near-identical
-host service around `contextmatrix-harness` (webhook auth, task-skills
-resolution, the worker stdin frame codec, Prometheus metrics, and log
-streaming) and the duplication was actively drifting: the same bugs were
-fixed twice, on different days, in different repos. backendkit is the
-junction module that lets both backends depend on one copy of that plumbing
-instead of two.
+`contextmatrix-agent` and `contextmatrix-chat`. Both run the same host service
+around `contextmatrix-harness` (webhook auth, task-skills resolution, the
+worker stdin frame codec, Prometheus metrics, and log streaming), so they
+depend on one copy of this plumbing instead of two.
 
 ## Architecture
 
@@ -26,10 +23,10 @@ pieces of each.
 
 ## Governing rule
 
-**Extraction never changes behavior.** Every package below is ported, not
-redesigned: if the agent's and chat's copies of a piece differ anywhere
-beyond a small, named seam, that piece stays per-repo and the kit's scope
-shrinks. There is no unifying of semantics under the banner of extraction.
+**Shared behavior only.** The kit holds a piece only when both backends need
+the same behavior from it. Where their needs differ beyond a small, named
+seam, the piece stays per-repo, and the kit never grows backend-specific
+semantics.
 
 ## Packages
 
@@ -43,9 +40,6 @@ instead of growing this list.
 | `frames` | The JSON Lines control-frame codec written to a worker container's stdin and read back by the work command, with the accepted frame-type set injected per backend. |
 | `metrics` | The common Prometheus registry bundle (go/process collectors plus the shared HTTP metrics) built from a per-backend namespace so existing metric names stay byte-identical. |
 | `logbridge` | The fan-out hub and harness-event-to-`protocol.LogEntry` classifier that streams worker output to the UI. |
-
-Only `frames` is implemented so far. The remaining four are ported in later
-extraction PRs, each with its own tests carried over from the two backends.
 
 ## Versioning policy
 
