@@ -1,6 +1,7 @@
 package webhookcore
 
 import (
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -68,32 +69,64 @@ func TestDedup_TTLExpiry(t *testing.T) {
 }
 
 func TestDedup_ConcurrentCheckAndRecordAdmitsOne(t *testing.T) {
-	const workers = 64
-
-	d := NewDedupCache(time.Minute, 16)
-
-	var (
-		fresh atomic.Int32
-		start = make(chan struct{})
-		wg    sync.WaitGroup
+	const (
+		rounds  = 1000
+		workers = 8
 	)
 
-	for range workers {
-		wg.Add(1)
+	d := NewDedupCache(time.Minute, 0)
 
-		go func() {
-			defer wg.Done()
+	for round := range rounds {
+		id := strconv.Itoa(round)
 
-			<-start
+		var (
+			fresh atomic.Int32
+			start = make(chan struct{})
+			wg    sync.WaitGroup
+		)
 
-			if !d.CheckAndRecord("scope", "m1") {
-				fresh.Add(1)
-			}
-		}()
+		for range workers {
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+
+				<-start
+
+				if !d.CheckAndRecord("scope", id) {
+					fresh.Add(1)
+				}
+			}()
+		}
+
+		close(start)
+		wg.Wait()
+
+		require.Equal(t, int32(1), fresh.Load(), "round %d", round)
+	}
+}
+
+func TestDedup_NonPositiveTTLNeverExpires(t *testing.T) {
+	now := time.Unix(0, 0)
+	d := NewDedupCache(0, 16, withDedupClock(func() time.Time { return now }))
+
+	assert.False(t, d.CheckAndRecord("s", "m1"))
+
+	now = now.Add(10 * 365 * 24 * time.Hour)
+
+	assert.True(t, d.CheckAndRecord("s", "m1"))
+}
+
+func TestDedup_NonPositiveCapacityNeverEvicts(t *testing.T) {
+	d := NewDedupCache(time.Hour, 0)
+
+	const n = 5000
+
+	for i := range n {
+		require.False(t, d.CheckAndRecord("s", strconv.Itoa(i)))
 	}
 
-	close(start)
-	wg.Wait()
-
-	assert.Equal(t, int32(1), fresh.Load())
+	for i := range n {
+		require.True(t, d.CheckAndRecord("s", strconv.Itoa(i)), "entry %d evicted", i)
+	}
 }
