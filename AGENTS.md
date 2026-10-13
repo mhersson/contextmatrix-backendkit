@@ -25,8 +25,8 @@ themselves, never here.
 
 ## Package map
 
-- `webhookcore` - HMAC auth middleware, replay cache, the SSE `/logs`
-  handler, and shared HTTP helpers.
+- `webhookcore` - HMAC auth middleware, replay cache, the `/message` dedup
+  cache, the SSE `/logs` handler, and shared HTTP helpers.
 - `taskskills` - signed-GET task-skills pointer fetch and shallow git clone.
 - `frames` - the worker container stdin JSON Lines control-frame codec.
 - `metrics` - the common Prometheus registry bundle, namespaced per backend.
