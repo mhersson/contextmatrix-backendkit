@@ -744,6 +744,18 @@ func TestRedaction(t *testing.T) {
 			t.Fatal("expected entry")
 		}
 	})
+
+	t.Run("unparsable stdout redacted", func(t *testing.T) {
+		bridge.BridgeLine(key, []byte("panic: "+secret+" goroutine 1"), false)
+
+		select {
+		case got := <-ch:
+			assert.NotContains(t, got.Content, secret)
+			assert.Contains(t, got.Content, "[REDACTED]")
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("expected entry")
+		}
+	})
 }
 
 // TestDiscussionMapping pins the mob-session live-transcript bridging routed
