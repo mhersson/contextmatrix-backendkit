@@ -1,9 +1,9 @@
 // Package webhookcore is the shared HTTP transport core for the ContextMatrix
 // execution backends. It provides HMAC signature verification, a replay cache,
-// the drain gate, request-count and duration metrics, the SSE /logs stream, and
-// the JSON write helpers. Each backend wires its own lifecycle handlers onto a
-// Core and mounts them behind these middlewares. It implements the
-// contextmatrix-protocol wire contract.
+// the /message dedup cache, the drain gate, request-count and duration metrics,
+// the SSE /logs stream, and the JSON write helpers. Each backend wires its own
+// lifecycle handlers onto a Core and mounts them behind these middlewares. It
+// implements the contextmatrix-protocol wire contract.
 package webhookcore
 
 import (
