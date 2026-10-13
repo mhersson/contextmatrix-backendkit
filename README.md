@@ -1,9 +1,9 @@
 # contextmatrix-backendkit
 
 Shared serve plumbing for the two ContextMatrix execution backends,
-`contextmatrix-agent` and `contextmatrix-chat`. Both run the same host service
-around `contextmatrix-harness` (webhook auth, task-skills resolution, the
-worker stdin frame codec, Prometheus metrics, and log streaming), so they
+`contextmatrix-agent` and `contextmatrix-chat`. Both run a near-identical host
+service around `contextmatrix-harness` (webhook auth, task-skills resolution,
+the worker stdin frame codec, Prometheus metrics, and log streaming), so they
 depend on one copy of this plumbing instead of two.
 
 ## Architecture
