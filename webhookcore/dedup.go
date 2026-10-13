@@ -13,9 +13,12 @@ import (
 // NUL. CheckAndRecord checks and records in one step, closing the race a split
 // check-then-record would leave between two concurrent retries. A caller that
 // gets a fresh result and then fails to deliver must call Rollback, or the
-// cache would swallow the legitimate retry as a duplicate. It is TTL- and
-// capacity-bounded; an empty messageID NEVER dedups (the client opted out of
-// at-most-once delivery). All methods are safe for concurrent use.
+// cache would swallow the legitimate retry as a duplicate. A retry arriving
+// mid-delivery is acked as a duplicate, so if that delivery then rolls back the
+// message is lost unless the caller holds one per-scope lock across
+// CheckAndRecord, delivery and Rollback. It is TTL- and capacity-bounded; an
+// empty messageID NEVER dedups (the client opted out of at-most-once delivery).
+// All methods are safe for concurrent use.
 type DedupCache struct {
 	mu       sync.Mutex
 	ttl      time.Duration
