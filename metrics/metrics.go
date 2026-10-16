@@ -90,7 +90,7 @@ func New(namespace string, endpoints []string) *Metrics {
 
 		BroadcasterDropsTotal: factory.NewCounter(prometheus.CounterOpts{
 			Name: namespace + "_broadcaster_drops_total",
-			Help: "Total log entries dropped for slow SSE subscribers. Unlabeled to keep series cardinality at O(1).",
+			Help: "Total log entries dropped for slow SSE subscribers or an overflowing retained backlog. Unlabeled to keep series cardinality at O(1).",
 		}),
 
 		endpoints: set,

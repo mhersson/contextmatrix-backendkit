@@ -31,7 +31,7 @@ themselves, never here.
 - `frames` - the worker container stdin JSON Lines control-frame codec.
 - `metrics` - the common Prometheus registry bundle, namespaced per backend.
 - `logbridge` - the fan-out hub and harness-event-to-`protocol.LogEntry`
-  classifier.
+  classifier. A backend can retain a per-key backlog replayed to a late consumer.
 
 ## Tests
 

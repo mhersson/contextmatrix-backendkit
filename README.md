@@ -39,7 +39,7 @@ instead of growing this list.
 | `taskskills` | The signed-GET task-skills pointer fetch and shallow git clone shared by both backends' worker provisioning. |
 | `frames` | The JSON Lines control-frame codec written to a worker container's stdin and read back by the work command, with the accepted frame-type set injected per backend. |
 | `metrics` | The common Prometheus registry bundle (go/process collectors plus the shared HTTP metrics) built from a per-backend namespace so existing metric names stay byte-identical. |
-| `logbridge` | The fan-out hub and harness-event-to-`protocol.LogEntry` classifier that streams worker output to the UI. |
+| `logbridge` | The fan-out hub and harness-event-to-`protocol.LogEntry` classifier that streams worker output to the UI. A backend can retain a per-key backlog so entries published before its consumer connects are replayed to it. |
 
 ## Versioning policy
 

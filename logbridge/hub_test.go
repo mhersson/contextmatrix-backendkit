@@ -210,3 +210,208 @@ func TestHubSubscribers(t *testing.T) {
 		})
 	})
 }
+
+type countingDrops struct{ n int }
+
+func (c *countingDrops) ObserveDrop() { c.n++ }
+
+func sessionKey(e protocol.LogEntry) string { return e.SessionID }
+
+func drain(t *testing.T, ch <-chan protocol.LogEntry, want int) []string {
+	t.Helper()
+
+	out := make([]string, 0, want)
+
+	for len(out) < want {
+		select {
+		case e := <-ch:
+			out = append(out, e.Content)
+		case <-time.After(200 * time.Millisecond):
+			t.Fatalf("got %d entries, want %d", len(out), want)
+		}
+	}
+
+	return out
+}
+
+func assertNone(t *testing.T, ch <-chan protocol.LogEntry) {
+	t.Helper()
+
+	select {
+	case e := <-ch:
+		t.Fatalf("unexpected entry %q", e.Content)
+	case <-time.After(30 * time.Millisecond):
+	}
+}
+
+func TestHubRetain(t *testing.T) {
+	t.Parallel()
+
+	entry := func(content string) protocol.LogEntry {
+		return protocol.LogEntry{Type: "system", SessionID: "s1", Content: content}
+	}
+
+	t.Run("retained entries replay ahead of live ones", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("s1")
+		hub.Publish(entry("a"))
+		hub.Publish(entry("b"))
+
+		_, ch := hub.Subscribe("s1")
+		hub.Publish(entry("c"))
+
+		assert.Equal(t, []string{"a", "b", "c"}, drain(t, ch, 3))
+	})
+
+	t.Run("without retain nothing is kept", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Publish(entry("a"))
+
+		_, ch := hub.Subscribe("s1")
+		assertNone(t, ch)
+	})
+
+	t.Run("release discards the backlog", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("s1")
+		hub.Publish(entry("a"))
+		hub.Release("s1")
+
+		_, ch := hub.Subscribe("s1")
+		assertNone(t, ch)
+	})
+
+	t.Run("an attached subscriber takes delivery and nothing is replayed later", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("s1")
+
+		id, ch := hub.Subscribe("s1")
+		hub.Publish(entry("a"))
+		assert.Equal(t, []string{"a"}, drain(t, ch, 1))
+
+		hub.Unsubscribe(id)
+		hub.Publish(entry("b"))
+
+		_, again := hub.Subscribe("s1")
+		assert.Equal(t, []string{"b"}, drain(t, again, 1), "only what was published while detached")
+	})
+
+	t.Run("an all-entries subscriber does not count as attached", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("s1")
+
+		_, all := hub.Subscribe("")
+		hub.Publish(entry("a"))
+		assert.Equal(t, []string{"a"}, drain(t, all, 1))
+
+		_, ch := hub.Subscribe("s1")
+		assert.Equal(t, []string{"a"}, drain(t, ch, 1), "the keyed subscriber still gets the backlog")
+	})
+
+	t.Run("the backlog is capped and drops are observed", func(t *testing.T) {
+		t.Parallel()
+
+		obs := &countingDrops{}
+		hub := logbridge.NewHub(sessionKey, obs)
+		hub.Retain("s1")
+
+		for i := range 257 {
+			hub.Publish(entry(fmt.Sprintf("%d", i)))
+		}
+
+		_, ch := hub.Subscribe("s1")
+		got := drain(t, ch, 256)
+		assert.Equal(t, "1", got[0], "the oldest entry was dropped")
+		assert.Equal(t, "256", got[255])
+		assert.Equal(t, 1, obs.n)
+	})
+
+	t.Run("retain is a no-op for a keyless hub", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(nil, nil)
+		hub.Retain("s1")
+		hub.Publish(entry("a"))
+
+		_, ch := hub.Subscribe("s1")
+		assertNone(t, ch)
+	})
+
+	t.Run("retain is a no-op for an empty key", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("")
+		hub.Publish(protocol.LogEntry{Type: "system", Content: "a"})
+
+		_, ch := hub.Subscribe("")
+		assertNone(t, ch)
+	})
+
+	t.Run("retain is idempotent", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("s1")
+		hub.Publish(entry("a"))
+		hub.Retain("s1")
+
+		_, ch := hub.Subscribe("s1")
+		assert.Equal(t, []string{"a"}, drain(t, ch, 1))
+	})
+
+	t.Run("an unread backlog returns when the subscriber leaves", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("s1")
+		hub.Publish(entry("a"))
+
+		id, _ := hub.Subscribe("s1")
+		hub.Unsubscribe(id)
+
+		_, ch := hub.Subscribe("s1")
+		assert.Equal(t, []string{"a"}, drain(t, ch, 1))
+	})
+
+	t.Run("unread live entries requeue ahead of later ones", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("s1")
+
+		id, _ := hub.Subscribe("s1")
+		hub.Publish(entry("a"))
+		hub.Publish(entry("b"))
+		hub.Unsubscribe(id)
+		hub.Publish(entry("c"))
+
+		_, ch := hub.Subscribe("s1")
+		assert.Equal(t, []string{"a", "b", "c"}, drain(t, ch, 3))
+	})
+
+	t.Run("nothing requeues while another subscriber holds the key", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("s1")
+
+		first, _ := hub.Subscribe("s1")
+		_, other := hub.Subscribe("s1")
+		hub.Publish(entry("a"))
+		hub.Unsubscribe(first)
+
+		assert.Equal(t, []string{"a"}, drain(t, other, 1))
+		assertNone(t, other)
+	})
+}
