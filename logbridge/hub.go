@@ -1,6 +1,7 @@
 package logbridge
 
 import (
+	"slices"
 	"sync"
 
 	protocol "github.com/mhersson/contextmatrix-protocol"
@@ -35,7 +36,8 @@ type Hub struct {
 	// here and are replayed, in order, ahead of live entries to the next
 	// subscriber with that filter. A backend uses it for the window between
 	// its session start and the consumer's first /logs connect, and for a
-	// consumer that reconnects.
+	// consumer that reconnects. A key stays retained across Subscribe until
+	// Release; entries a departing subscriber never read return to its front.
 	retained map[string][]protocol.LogEntry
 }
 
@@ -51,7 +53,9 @@ func NewHub(keyOf func(protocol.LogEntry) string, obs DropObserver) *Hub {
 // subscriber has that exact filter reach the next one instead of being
 // dropped. Idempotent, and a no-op for an empty key or a hub without keyOf.
 // The backlog holds at most subBufSize entries: beyond that the oldest is
-// dropped and the DropObserver notified.
+// dropped and the DropObserver notified. The caller pairs Retain with Release
+// when the key's lifetime ends: a retained key survives Subscribe so it can
+// serve reconnects.
 func (h *Hub) Retain(key string) {
 	if key == "" || h.keyOf == nil {
 		return
@@ -99,15 +103,65 @@ func (h *Hub) Subscribe(filter string) (int, <-chan protocol.LogEntry) {
 	return id, ch
 }
 
-// Unsubscribe removes the subscriber and closes its channel.
+// Unsubscribe removes the subscriber and closes its channel. When the filter
+// is retained and no other subscriber carries it, entries the subscriber never
+// read return to the front of the key's backlog, so a consumer that leaves
+// before reading loses nothing.
 func (h *Hub) Unsubscribe(id int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if s, ok := h.subs[id]; ok {
-		delete(h.subs, id)
-		close(s.ch)
+	s, ok := h.subs[id]
+	if !ok {
+		return
 	}
+
+	delete(h.subs, id)
+
+	if backlog, kept := h.retained[s.filter]; kept && !h.holds(s.filter) {
+		h.retained[s.filter] = h.requeue(s.ch, backlog)
+	}
+
+	close(s.ch)
+}
+
+// holds reports whether any registered subscriber carries filter.
+func (h *Hub) holds(filter string) bool {
+	for _, s := range h.subs {
+		if s.filter == filter {
+			return true
+		}
+	}
+
+	return false
+}
+
+// requeue drains ch without blocking and returns the entries ahead of backlog,
+// keeping at most subBufSize and dropping the oldest beyond that.
+func (h *Hub) requeue(ch chan protocol.LogEntry, backlog []protocol.LogEntry) []protocol.LogEntry {
+	var unread []protocol.LogEntry
+
+	for {
+		select {
+		case e := <-ch:
+			unread = append(unread, e)
+
+			continue
+		default:
+		}
+
+		break
+	}
+
+	merged := slices.Concat(unread, backlog)
+
+	for len(merged) > subBufSize {
+		merged = merged[1:]
+
+		h.observeDrop()
+	}
+
+	return merged
 }
 
 // Publish delivers e to all matching subscribers. Per-subscriber delivery is

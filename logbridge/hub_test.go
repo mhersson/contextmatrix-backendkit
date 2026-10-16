@@ -336,7 +336,7 @@ func TestHubRetain(t *testing.T) {
 		assert.Equal(t, 1, obs.n)
 	})
 
-	t.Run("retain is a no-op for an empty key or a keyless hub", func(t *testing.T) {
+	t.Run("retain is a no-op for a keyless hub", func(t *testing.T) {
 		t.Parallel()
 
 		hub := logbridge.NewHub(nil, nil)
@@ -345,5 +345,73 @@ func TestHubRetain(t *testing.T) {
 
 		_, ch := hub.Subscribe("s1")
 		assertNone(t, ch)
+	})
+
+	t.Run("retain is a no-op for an empty key", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("")
+		hub.Publish(protocol.LogEntry{Type: "system", Content: "a"})
+
+		_, ch := hub.Subscribe("")
+		assertNone(t, ch)
+	})
+
+	t.Run("retain is idempotent", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("s1")
+		hub.Publish(entry("a"))
+		hub.Retain("s1")
+
+		_, ch := hub.Subscribe("s1")
+		assert.Equal(t, []string{"a"}, drain(t, ch, 1))
+	})
+
+	t.Run("an unread backlog returns when the subscriber leaves", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("s1")
+		hub.Publish(entry("a"))
+
+		id, _ := hub.Subscribe("s1")
+		hub.Unsubscribe(id)
+
+		_, ch := hub.Subscribe("s1")
+		assert.Equal(t, []string{"a"}, drain(t, ch, 1))
+	})
+
+	t.Run("unread live entries requeue ahead of later ones", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("s1")
+
+		id, _ := hub.Subscribe("s1")
+		hub.Publish(entry("a"))
+		hub.Publish(entry("b"))
+		hub.Unsubscribe(id)
+		hub.Publish(entry("c"))
+
+		_, ch := hub.Subscribe("s1")
+		assert.Equal(t, []string{"a", "b", "c"}, drain(t, ch, 3))
+	})
+
+	t.Run("nothing requeues while another subscriber holds the key", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("s1")
+
+		first, _ := hub.Subscribe("s1")
+		_, other := hub.Subscribe("s1")
+		hub.Publish(entry("a"))
+		hub.Unsubscribe(first)
+
+		assert.Equal(t, []string{"a"}, drain(t, other, 1))
+		assertNone(t, other)
 	})
 }
