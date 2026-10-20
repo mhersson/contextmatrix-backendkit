@@ -126,6 +126,19 @@ func TestHealth_SlowRevisionHookOmitsRevision(t *testing.T) {
 	assert.NotContains(t, w.Body.String(), "worker_image_revision")
 }
 
+// A typed-nil executor or a missing nil guard in ImageLabels must not make CM
+// mark the backend unreachable.
+func TestHealth_PanickingRevisionHookOmitsRevision(t *testing.T) {
+	c := NewCore(CoreConfig{WorkerImageRevision: func(context.Context) string {
+		panic("nil pointer dereference")
+	}})
+
+	w, hr := getHealth(t, c, nil)
+
+	assert.True(t, hr.OK)
+	assert.NotContains(t, w.Body.String(), "worker_image_revision")
+}
+
 func TestHealth_RevisionHookSeesRequestCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

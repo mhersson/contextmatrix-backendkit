@@ -65,7 +65,7 @@ type CoreConfig struct {
 	ImageListFilters  []string
 
 	// Build is copied into every /health answer; a nil Changes is reported as
-	// [] so CM can tell "no history recorded" from a backend without the field.
+	// [], since CM reads [] as "no history recorded" and never expects null.
 	Build protocol.BuildInfo
 
 	// WorkerImageRevision reports the revision of the backend's default worker

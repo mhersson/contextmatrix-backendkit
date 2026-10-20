@@ -27,16 +27,29 @@ func (c *Core) HandleHealth(w http.ResponseWriter, r *http.Request) {
 		Build:             &build,
 	}
 
-	// Synchronous on purpose: a panicking hook stays inside net/http's
-	// per-request recover instead of crashing serve from a goroutine.
 	if c.workerImageRevision != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), workerImageRevisionTimeout)
-		resp.WorkerImageRevision = c.workerImageRevision(ctx)
-
-		cancel()
+		resp.WorkerImageRevision = c.imageRevision(r.Context())
 	}
 
 	WriteJSON(w, http.StatusOK, resp)
+}
+
+// imageRevision runs the hook synchronously, never in a goroutine, so a hook
+// that ignores its deadline cannot pile up goroutines. A panic, such as a
+// typed-nil executor, is logged and reads as unknown so /health still answers.
+func (c *Core) imageRevision(parent context.Context) (rev string) {
+	ctx, cancel := context.WithTimeout(parent, workerImageRevisionTimeout)
+	defer cancel()
+
+	defer func() {
+		if p := recover(); p != nil {
+			c.logger.Error("worker image revision hook panicked", "panic", p)
+
+			rev = ""
+		}
+	}()
+
+	return c.workerImageRevision(ctx)
 }
 
 // readyResponse is the /readyz body. It is a custom shape (not ErrorResponse)
