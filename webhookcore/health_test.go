@@ -1,11 +1,13 @@
 package webhookcore
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	protocol "github.com/mhersson/contextmatrix-protocol"
 	"github.com/stretchr/testify/assert"
@@ -74,6 +76,71 @@ func TestHealth_UnsetBuildReportsEmptyChanges(t *testing.T) {
 
 	assert.Contains(t, w.Body.String(), `"build":{"changes":[]}`)
 	assert.NotContains(t, w.Body.String(), "worker_image_revision")
+}
+
+func TestHealth_ReportsWorkerImageRevision(t *testing.T) {
+	const rev = "fedcba9876543210fedcba9876543210fedcba98"
+
+	c := NewCore(CoreConfig{WorkerImageRevision: func(context.Context) string { return rev }})
+
+	_, hr := getHealth(t, c, nil)
+
+	assert.Equal(t, rev, hr.WorkerImageRevision)
+}
+
+func TestHealth_RevisionHookGetsBoundedContext(t *testing.T) {
+	var (
+		remaining time.Duration
+		ok        bool
+	)
+
+	c := NewCore(CoreConfig{WorkerImageRevision: func(ctx context.Context) string {
+		var deadline time.Time
+
+		deadline, ok = ctx.Deadline()
+		remaining = time.Until(deadline)
+
+		return ""
+	}})
+
+	getHealth(t, c, nil)
+
+	require.True(t, ok, "hook context must carry a deadline")
+	assert.Positive(t, remaining)
+	assert.LessOrEqual(t, remaining, workerImageRevisionTimeout)
+}
+
+// A hung Docker daemon must not turn /health into a timeout at CM.
+func TestHealth_SlowRevisionHookOmitsRevision(t *testing.T) {
+	c := NewCore(CoreConfig{WorkerImageRevision: func(ctx context.Context) string {
+		<-ctx.Done()
+
+		return ""
+	}})
+
+	start := time.Now()
+	w, hr := getHealth(t, c, nil)
+
+	assert.Less(t, time.Since(start), workerImageRevisionTimeout+time.Second)
+	assert.True(t, hr.OK)
+	assert.NotContains(t, w.Body.String(), "worker_image_revision")
+}
+
+func TestHealth_RevisionHookSeesRequestCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var hookErr error
+
+	c := NewCore(CoreConfig{WorkerImageRevision: func(ctx context.Context) string {
+		hookErr = ctx.Err()
+
+		return ""
+	}})
+
+	getHealth(t, c, httptest.NewRequestWithContext(ctx, http.MethodGet, "/health", nil))
+
+	assert.ErrorIs(t, hookErr, context.Canceled)
 }
 
 func TestHealth_NilTrackerReportsZero(t *testing.T) {

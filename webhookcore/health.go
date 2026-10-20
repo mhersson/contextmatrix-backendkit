@@ -1,12 +1,18 @@
 package webhookcore
 
 import (
+	"context"
 	"net/http"
+	"time"
 
 	protocol "github.com/mhersson/contextmatrix-protocol"
 )
 
-func (c *Core) HandleHealth(w http.ResponseWriter, _ *http.Request) {
+// workerImageRevisionTimeout keeps a slow Docker lookup well inside CM's
+// /health probe timeout.
+const workerImageRevisionTimeout = 500 * time.Millisecond
+
+func (c *Core) HandleHealth(w http.ResponseWriter, r *http.Request) {
 	running := 0
 	if c.tracker != nil {
 		running = c.tracker.Count()
@@ -14,12 +20,23 @@ func (c *Core) HandleHealth(w http.ResponseWriter, _ *http.Request) {
 
 	build := c.build
 
-	WriteJSON(w, http.StatusOK, protocol.HealthResponse{
+	resp := protocol.HealthResponse{
 		OK:                true,
 		RunningContainers: running,
 		MaxConcurrent:     c.maxConcurrent,
 		Build:             &build,
-	})
+	}
+
+	// Synchronous on purpose: a panicking hook stays inside net/http's
+	// per-request recover instead of crashing serve from a goroutine.
+	if c.workerImageRevision != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), workerImageRevisionTimeout)
+		resp.WorkerImageRevision = c.workerImageRevision(ctx)
+
+		cancel()
+	}
+
+	WriteJSON(w, http.StatusOK, resp)
 }
 
 // readyResponse is the /readyz body. It is a custom shape (not ErrorResponse)
