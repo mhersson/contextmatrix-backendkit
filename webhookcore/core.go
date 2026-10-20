@@ -63,6 +63,10 @@ type CoreConfig struct {
 	MaxConcurrent     int
 	Images            ImageLister
 	ImageListFilters  []string
+
+	// Build is copied into every /health answer; a nil Changes is reported as
+	// [] so CM can tell "no history recorded" from a backend without the field.
+	Build protocol.BuildInfo
 }
 
 // Core is the shared HTTP transport surface both backends mount their lifecycle
@@ -93,6 +97,8 @@ type Core struct {
 	maxConcurrent    int
 	images           ImageLister
 	imageListFilters []string
+
+	build protocol.BuildInfo
 
 	// sseShutdown is closed by CloseSSE at drain so every in-flight /logs handler
 	// returns promptly (an SSE stream never idles, so http.Server.Shutdown would
@@ -125,6 +131,11 @@ func NewCore(cfg CoreConfig) *Core {
 		draining = &atomic.Bool{}
 	}
 
+	build := cfg.Build
+	if build.Changes == nil {
+		build.Changes = []protocol.Change{}
+	}
+
 	return &Core{
 		apiKey:            cfg.APIKey,
 		metricsToken:      cfg.MetricsToken,
@@ -141,6 +152,7 @@ func NewCore(cfg CoreConfig) *Core {
 		maxConcurrent:     cfg.MaxConcurrent,
 		images:            cfg.Images,
 		imageListFilters:  cfg.ImageListFilters,
+		build:             build,
 		sseShutdown:       make(chan struct{}),
 	}
 }

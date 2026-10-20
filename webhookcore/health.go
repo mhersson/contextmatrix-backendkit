@@ -12,10 +12,13 @@ func (c *Core) HandleHealth(w http.ResponseWriter, _ *http.Request) {
 		running = c.tracker.Count()
 	}
 
+	build := c.build
+
 	WriteJSON(w, http.StatusOK, protocol.HealthResponse{
 		OK:                true,
 		RunningContainers: running,
 		MaxConcurrent:     c.maxConcurrent,
+		Build:             &build,
 	})
 }
 
