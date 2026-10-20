@@ -63,6 +63,16 @@ type CoreConfig struct {
 	MaxConcurrent     int
 	Images            ImageLister
 	ImageListFilters  []string
+
+	// Build is copied into every /health answer; a nil Changes is reported as
+	// [], since CM reads [] as "no history recorded" and never expects null.
+	Build protocol.BuildInfo
+
+	// WorkerImageRevision reports the revision of the backend's default worker
+	// image on /health; nil omits the field and "" means unknown. Each call
+	// gets the request's context capped at 500ms and must return once it is
+	// done.
+	WorkerImageRevision func(ctx context.Context) string
 }
 
 // Core is the shared HTTP transport surface both backends mount their lifecycle
@@ -93,6 +103,9 @@ type Core struct {
 	maxConcurrent    int
 	images           ImageLister
 	imageListFilters []string
+
+	build               protocol.BuildInfo
+	workerImageRevision func(context.Context) string
 
 	// sseShutdown is closed by CloseSSE at drain so every in-flight /logs handler
 	// returns promptly (an SSE stream never idles, so http.Server.Shutdown would
@@ -125,23 +138,30 @@ func NewCore(cfg CoreConfig) *Core {
 		draining = &atomic.Bool{}
 	}
 
+	build := cfg.Build
+	if build.Changes == nil {
+		build.Changes = []protocol.Change{}
+	}
+
 	return &Core{
-		apiKey:            cfg.APIKey,
-		metricsToken:      cfg.MetricsToken,
-		skew:              skew,
-		replay:            replay,
-		draining:          draining,
-		keepaliveInterval: cfg.KeepaliveInterval,
-		metrics:           cfg.Metrics,
-		logger:            logger,
-		hub:               cfg.Hub,
-		logsFilterParam:   cfg.LogsFilterParam,
-		logsFilterAttr:    cfg.LogsFilterAttr,
-		tracker:           cfg.Tracker,
-		maxConcurrent:     cfg.MaxConcurrent,
-		images:            cfg.Images,
-		imageListFilters:  cfg.ImageListFilters,
-		sseShutdown:       make(chan struct{}),
+		apiKey:              cfg.APIKey,
+		metricsToken:        cfg.MetricsToken,
+		skew:                skew,
+		replay:              replay,
+		draining:            draining,
+		keepaliveInterval:   cfg.KeepaliveInterval,
+		metrics:             cfg.Metrics,
+		logger:              logger,
+		hub:                 cfg.Hub,
+		logsFilterParam:     cfg.LogsFilterParam,
+		logsFilterAttr:      cfg.LogsFilterAttr,
+		tracker:             cfg.Tracker,
+		maxConcurrent:       cfg.MaxConcurrent,
+		images:              cfg.Images,
+		imageListFilters:    cfg.ImageListFilters,
+		build:               build,
+		workerImageRevision: cfg.WorkerImageRevision,
+		sseShutdown:         make(chan struct{}),
 	}
 }
 

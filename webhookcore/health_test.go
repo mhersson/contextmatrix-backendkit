@@ -1,11 +1,13 @@
 package webhookcore
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	protocol "github.com/mhersson/contextmatrix-protocol"
 	"github.com/stretchr/testify/assert"
@@ -18,37 +20,146 @@ type fakeTracker struct {
 
 func (f fakeTracker) Count() int { return f.n }
 
+// getHealth serves one /health request; a nil r is a plain GET /health.
+func getHealth(t *testing.T, c *Core, r *http.Request) (*httptest.ResponseRecorder, protocol.HealthResponse) {
+	t.Helper()
+
+	if r == nil {
+		r = httptest.NewRequest(http.MethodGet, "/health", nil)
+	}
+
+	w := httptest.NewRecorder()
+	c.HandleHealth(w, r)
+
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var hr protocol.HealthResponse
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &hr))
+
+	return w, hr
+}
+
 func TestHealth_ReportsTrackerCountAndMaxConcurrent(t *testing.T) {
 	c := NewCore(CoreConfig{
 		Tracker:       fakeTracker{n: 1},
 		MaxConcurrent: 7,
 	})
 
-	r := httptest.NewRequest(http.MethodGet, "/health", nil)
-	w := httptest.NewRecorder()
-	c.HandleHealth(w, r)
-
-	require.Equal(t, http.StatusOK, w.Code)
-
-	var hr protocol.HealthResponse
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &hr))
+	_, hr := getHealth(t, c, nil)
 
 	assert.True(t, hr.OK)
 	assert.Equal(t, 1, hr.RunningContainers)
 	assert.Equal(t, 7, hr.MaxConcurrent)
 }
 
+func TestHealth_ReportsConfiguredBuild(t *testing.T) {
+	build := protocol.BuildInfo{
+		Version:   "v1.2.0",
+		Commit:    "0123456789abcdef0123456789abcdef01234567",
+		BuildTime: "2026-10-21T10:00:00Z",
+		Changes: []protocol.Change{{
+			Number: 26, Kind: protocol.ChangeKindFeat,
+			Title: "retain a per-key backlog", MergedAt: "2026-10-17T14:04:32Z",
+		}},
+	}
+
+	_, hr := getHealth(t, NewCore(CoreConfig{Build: build}), nil)
+
+	require.NotNil(t, hr.Build)
+	assert.Equal(t, build, *hr.Build)
+	assert.Empty(t, hr.WorkerImageRevision)
+}
+
+// CM reads "changes":[] as "no history recorded" and must never see null.
+func TestHealth_UnsetBuildReportsEmptyChanges(t *testing.T) {
+	w, _ := getHealth(t, NewCore(CoreConfig{}), nil)
+
+	assert.Contains(t, w.Body.String(), `"build":{"changes":[]}`)
+	assert.NotContains(t, w.Body.String(), "worker_image_revision")
+}
+
+func TestHealth_ReportsWorkerImageRevision(t *testing.T) {
+	const rev = "fedcba9876543210fedcba9876543210fedcba98"
+
+	c := NewCore(CoreConfig{WorkerImageRevision: func(context.Context) string { return rev }})
+
+	_, hr := getHealth(t, c, nil)
+
+	assert.Equal(t, rev, hr.WorkerImageRevision)
+}
+
+func TestHealth_RevisionHookGetsBoundedContext(t *testing.T) {
+	var (
+		remaining time.Duration
+		ok        bool
+	)
+
+	c := NewCore(CoreConfig{WorkerImageRevision: func(ctx context.Context) string {
+		var deadline time.Time
+
+		deadline, ok = ctx.Deadline()
+		remaining = time.Until(deadline)
+
+		return ""
+	}})
+
+	getHealth(t, c, nil)
+
+	require.True(t, ok, "hook context must carry a deadline")
+	assert.Positive(t, remaining)
+	assert.LessOrEqual(t, remaining, workerImageRevisionTimeout)
+}
+
+// A hung Docker daemon must not turn /health into a timeout at CM.
+func TestHealth_SlowRevisionHookOmitsRevision(t *testing.T) {
+	c := NewCore(CoreConfig{WorkerImageRevision: func(ctx context.Context) string {
+		<-ctx.Done()
+
+		return ""
+	}})
+
+	start := time.Now()
+	w, hr := getHealth(t, c, nil)
+
+	assert.Less(t, time.Since(start), workerImageRevisionTimeout+time.Second)
+	assert.True(t, hr.OK)
+	assert.NotContains(t, w.Body.String(), "worker_image_revision")
+}
+
+// A typed-nil executor or a missing nil guard in ImageLabels must not make CM
+// mark the backend unreachable.
+func TestHealth_PanickingRevisionHookOmitsRevision(t *testing.T) {
+	c := NewCore(CoreConfig{WorkerImageRevision: func(context.Context) string {
+		panic("nil pointer dereference")
+	}})
+
+	w, hr := getHealth(t, c, nil)
+
+	assert.True(t, hr.OK)
+	assert.NotContains(t, w.Body.String(), "worker_image_revision")
+}
+
+func TestHealth_RevisionHookSeesRequestCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var hookErr error
+
+	c := NewCore(CoreConfig{WorkerImageRevision: func(ctx context.Context) string {
+		hookErr = ctx.Err()
+
+		return ""
+	}})
+
+	getHealth(t, c, httptest.NewRequestWithContext(ctx, http.MethodGet, "/health", nil))
+
+	assert.ErrorIs(t, hookErr, context.Canceled)
+}
+
 func TestHealth_NilTrackerReportsZero(t *testing.T) {
 	c := NewCore(CoreConfig{MaxConcurrent: 5}) // no Tracker
 
-	r := httptest.NewRequest(http.MethodGet, "/health", nil)
-	w := httptest.NewRecorder()
-	c.HandleHealth(w, r)
-
-	require.Equal(t, http.StatusOK, w.Code)
-
-	var hr protocol.HealthResponse
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &hr))
+	_, hr := getHealth(t, c, nil)
 
 	assert.True(t, hr.OK)
 	assert.Equal(t, 0, hr.RunningContainers)

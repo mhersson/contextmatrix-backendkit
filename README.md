@@ -35,7 +35,7 @@ instead of growing this list.
 
 | Package | What it holds |
 | --- | --- |
-| `webhookcore` | HMAC auth middleware, replay cache, the `/message` dedup cache, the SSE `/logs` handler, and the shared HTTP helpers (JSON decode/encode, health, readyz, images) behind both backends' webhook servers. |
+| `webhookcore` | HMAC auth middleware, replay cache, the `/message` dedup cache, the SSE `/logs` handler, and the shared HTTP helpers (JSON decode/encode, health (the build and the default worker image's revision, read through an ImageLabeler the serve layer supplies), readyz, images) behind both backends' webhook servers. |
 | `taskskills` | The signed-GET task-skills pointer fetch and shallow git clone shared by both backends' worker provisioning. |
 | `frames` | The JSON Lines control-frame codec written to a worker container's stdin and read back by the work command, with the accepted frame-type set injected per backend. |
 | `metrics` | The common Prometheus registry bundle (go/process collectors plus the shared HTTP metrics) built from a per-backend namespace so existing metric names stay byte-identical. |
