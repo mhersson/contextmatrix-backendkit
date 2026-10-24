@@ -1,6 +1,9 @@
 package llmproxy_test
 
 import (
+	"bufio"
+	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/pem"
 	"io"
@@ -12,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/assert"
@@ -258,15 +262,23 @@ func TestNewRejectsBadPrefix(t *testing.T) {
 	}
 }
 
+// mounted serves p the way adopters do: behind the metrics middleware.
+func mounted(t *testing.T, p *llmproxy.Proxy) (*httptest.Server, *metrics.Metrics) {
+	t.Helper()
+
+	m := metrics.New("t", llmproxy.Paths("/llm"))
+	core := webhookcore.NewCore(webhookcore.CoreConfig{Metrics: m})
+
+	return serve(t, core.RecordMetrics(p.ServeHTTP)), m
+}
+
 func TestMountedMetricsLabel(t *testing.T) {
 	up, _ := capture(t, nil)
 	p := newProxy(t, llmproxy.Config{})
 	tok, err := p.Register("run", protocol.LLMEndpoint{Type: "openai", BaseURL: up.URL})
 	require.NoError(t, err)
 
-	m := metrics.New("t", llmproxy.Paths("/llm"))
-	core := webhookcore.NewCore(webhookcore.CoreConfig{Metrics: m})
-	srv := serve(t, core.RecordMetrics(p.ServeHTTP))
+	srv, m := mounted(t, p)
 
 	resp := call(t, srv.URL, http.MethodPost, "/llm/chat/completions", tok, strings.NewReader("{}"))
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -326,4 +338,321 @@ func TestDialFailureIs502(t *testing.T) {
 
 	resp := call(t, serve(t, p).URL, http.MethodGet, "/llm/models", tok, nil)
 	assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
+}
+
+// gate blocks upstream handlers until opened. Register open with t.Cleanup after
+// the servers so it runs first and a blocked handler never wedges Server.Close.
+type gate struct {
+	ch   chan struct{}
+	once sync.Once
+}
+
+func newGate() *gate { return &gate{ch: make(chan struct{})} }
+
+func (g *gate) open() { g.once.Do(func() { close(g.ch) }) }
+
+func startStream(ctx context.Context, t *testing.T, url, token string, body io.Reader) *http.Response {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/llm/chat/completions", body)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+
+	t.Cleanup(func() { _ = resp.Body.Close() })
+
+	return resp
+}
+
+// lineReader delivers the response lines over a channel so tests can wait with a timer.
+func lineReader(resp *http.Response) <-chan string {
+	lines := make(chan string, 64)
+
+	go func() {
+		defer close(lines)
+
+		sc := bufio.NewReader(resp.Body)
+		for {
+			l, err := sc.ReadString('\n')
+			if l != "" {
+				lines <- strings.TrimRight(l, "\n")
+			}
+
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	return lines
+}
+
+func nextLine(t *testing.T, lines <-chan string, within time.Duration) string {
+	t.Helper()
+
+	select {
+	case l, ok := <-lines:
+		require.True(t, ok, "stream ended early")
+
+		return l
+	case <-time.After(within):
+		require.FailNow(t, "no line within deadline")
+
+		return ""
+	}
+}
+
+func TestSSEFlushAndKeepalive(t *testing.T) {
+	hold := newGate()
+	up := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+
+		fl := w.(http.Flusher)
+
+		_, _ = io.WriteString(w, ": keepalive\n\n")
+
+		fl.Flush()
+
+		_, _ = io.WriteString(w, "data: {\"x\":1}\n\n")
+
+		fl.Flush()
+
+		select {
+		case <-hold.ch:
+		case <-r.Context().Done():
+		}
+	}))
+
+	p := newProxy(t, llmproxy.Config{})
+	tok, err := p.Register("run", protocol.LLMEndpoint{Type: "openai", BaseURL: up.URL})
+	require.NoError(t, err)
+
+	srv, _ := mounted(t, p)
+	t.Cleanup(hold.open)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+
+	lines := lineReader(startStream(ctx, t, srv.URL, tok, strings.NewReader("{}")))
+
+	assert.Equal(t, ": keepalive", nextLine(t, lines, 2*time.Second))
+	assert.Empty(t, nextLine(t, lines, 2*time.Second))
+	assert.JSONEq(t, `{"x":1}`, strings.TrimPrefix(nextLine(t, lines, 2*time.Second), "data: "))
+}
+
+func TestBodiesByteIdentical(t *testing.T) {
+	const respBody = `{ "usage" :{"prompt_tokens":10,"completion_tokens":5,"cost":0.000123456789} ,"id":"gen-1",  "choices":[ ]}`
+
+	var chunk bytes.Buffer
+	for i := range 4096 {
+		chunk.WriteByte(byte('A' + i%26))
+	}
+
+	reqBody := []byte(`{"model":"m","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,`)
+	for len(reqBody) < 3<<20 {
+		reqBody = append(reqBody, chunk.Bytes()...)
+	}
+
+	reqBody = append(reqBody, `"}}]}]}`...)
+
+	var got []byte
+
+	up := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got, _ = io.ReadAll(r.Body)
+		_, _ = io.WriteString(w, respBody)
+	}))
+
+	p := newProxy(t, llmproxy.Config{})
+	tok, err := p.Register("run", protocol.LLMEndpoint{Type: "openai", BaseURL: up.URL})
+	require.NoError(t, err)
+
+	srv, _ := mounted(t, p)
+
+	resp := call(t, srv.URL, http.MethodPost, "/llm/chat/completions", tok, bytes.NewReader(reqBody))
+	out, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.True(t, bytes.Equal(reqBody, got), "request body altered (%d vs %d bytes)", len(reqBody), len(got))
+	assert.True(t, bytes.Equal([]byte(respBody), out), "response body altered: %q", out)
+}
+
+func TestStatusErrorBodyRetryAfter(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     int
+		retryAfter string
+		body       string
+	}{
+		{"400 routing failure", 400, "", `{"error":{"message":"m","metadata":{"failed_routing_step":"provider"}}}`},
+		{"429 seconds", 429, "7", `{"error":{"message":"slow down"}}`},
+		{"503 http-date", 503, "Wed, 21 Oct 2026 07:28:00 GMT", `{"error":{"message":"busy"}}`},
+		{"401 from upstream", 401, "", `{"error":{"message":"bad key"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			up := serve(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.retryAfter != "" {
+					w.Header().Set("Retry-After", tc.retryAfter)
+				}
+
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+
+			p := newProxy(t, llmproxy.Config{})
+			tok, err := p.Register("run", protocol.LLMEndpoint{Type: "openai", BaseURL: up.URL})
+			require.NoError(t, err)
+
+			srv, _ := mounted(t, p)
+
+			resp := call(t, srv.URL, http.MethodPost, "/llm/chat/completions", tok, strings.NewReader("{}"))
+			out, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+
+			assert.Equal(t, tc.status, resp.StatusCode)
+			assert.Equal(t, tc.body, string(out))
+			assert.Equal(t, tc.retryAfter, resp.Header.Get("Retry-After"))
+		})
+	}
+}
+
+func TestConcurrentStreamsKeepTheirOwnKey(t *testing.T) {
+	const perRun = 8
+
+	all := newGate()
+
+	var (
+		mu      sync.Mutex
+		arrived int
+		bearers = map[string][]string{}
+	)
+
+	up := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		run := r.Header.Get("X-Run")
+		bearers[run] = append(bearers[run], r.Header.Get("Authorization"))
+		arrived++
+
+		if arrived == 2*perRun {
+			all.open()
+		}
+		mu.Unlock()
+
+		select {
+		case <-all.ch:
+		case <-r.Context().Done():
+			return
+		}
+
+		_, _ = io.WriteString(w, "data: ok\n\n")
+		w.(http.Flusher).Flush()
+	}))
+
+	p := newProxy(t, llmproxy.Config{})
+	tokens := map[string]string{}
+
+	for _, run := range []string{"a", "b"} {
+		tok, err := p.Register("key-"+run, protocol.LLMEndpoint{Type: "openai", BaseURL: up.URL, APIKey: "up-" + run})
+		require.NoError(t, err)
+
+		tokens[run] = tok
+	}
+
+	srv, _ := mounted(t, p)
+	t.Cleanup(all.open)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	errs := make(chan error, 2*perRun)
+
+	var wg sync.WaitGroup
+
+	for run, tok := range tokens {
+		for range perRun {
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+
+				req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/llm/chat/completions", strings.NewReader("{}"))
+				if err != nil {
+					errs <- err
+
+					return
+				}
+
+				req.Header.Set("Authorization", "Bearer "+tok)
+				req.Header.Set("X-Run", run)
+
+				resp, err := http.DefaultClient.Do(req)
+				if err != nil {
+					errs <- err
+
+					return
+				}
+				defer resp.Body.Close()
+
+				_, err = io.Copy(io.Discard, resp.Body)
+				errs <- err
+			}()
+		}
+	}
+
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	for _, run := range []string{"a", "b"} {
+		require.Len(t, bearers[run], perRun, "run %s", run)
+
+		for _, got := range bearers[run] {
+			assert.Equal(t, "Bearer up-"+run, got)
+		}
+	}
+}
+
+func TestClientHangupCancelsUpstream(t *testing.T) {
+	hold := newGate()
+	cancelled := make(chan struct{})
+
+	up := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "data: first\n\n")
+		w.(http.Flusher).Flush()
+
+		select {
+		case <-r.Context().Done():
+			close(cancelled)
+		case <-hold.ch:
+		}
+	}))
+
+	p := newProxy(t, llmproxy.Config{})
+	tok, err := p.Register("run", protocol.LLMEndpoint{Type: "openai", BaseURL: up.URL})
+	require.NoError(t, err)
+
+	srv, _ := mounted(t, p)
+	t.Cleanup(hold.open)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	lines := lineReader(startStream(ctx, t, srv.URL, tok, strings.NewReader("{}")))
+	assert.Equal(t, "data: first", nextLine(t, lines, 2*time.Second))
+
+	cancel()
+
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		require.FailNow(t, "upstream request not cancelled after client hangup")
+	}
 }
