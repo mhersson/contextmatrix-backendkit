@@ -6,7 +6,8 @@ execution backends, run a near-identical host service around
 `contextmatrix-harness` (webhook auth, task-skills resolution, the worker
 stdin frame codec, Prometheus metrics, and log streaming); the architect
 mounts the same webhook core and log bridge. All three depend on one copy of
-this plumbing instead of their own.
+this plumbing instead of their own. The kit also holds `llmproxy`, the per-run
+LLM proxy intended for agent's and chat's serve.
 
 ## Architecture
 
@@ -33,7 +34,7 @@ semantics.
 
 ## Packages
 
-Five named seams. A piece that needs a sixth goes back to per-repo code
+Six named seams. A piece that needs a seventh goes back to per-repo code
 instead of growing this list.
 
 | Package | What it holds |
@@ -43,6 +44,36 @@ instead of growing this list.
 | `frames` | The JSON Lines control-frame codec written to a worker container's stdin and read back by the work command, with the accepted frame-type set injected per backend. |
 | `metrics` | The common Prometheus registry bundle (go/process collectors plus the shared HTTP metrics) built from a per-backend namespace so existing metric names stay byte-identical. |
 | `logbridge` | The fan-out hub and harness-event-to-`protocol.LogEntry` classifier that streams worker output to the UI. A backend can retain a per-key backlog so entries published before its consumer connects are replayed to it. |
+| `llmproxy` | The per-run LLM proxy: a stand-in token registry and a reverse proxy that swaps in the real bearer, so workers never hold the LLM key. |
+
+## llmproxy
+
+```
+ CM ──trigger (real key)──▶ serve (host)
+                            ┌──────────────────────────────┐
+                            │ keeps REAL KEY in memory     │
+                            │ proxy: token T → REAL KEY    │
+                            └──▲─────────────────┬─────────┘
+            gives the container│only token T     │ Authorization: REAL KEY
+            + proxy URL        │                 ▼
+                  ┌────────────┼── worker ─┐   LLM gateway / OpenRouter
+                  │ LLM_API_KEY = T (stand-in)
+                  │ LLM_BASE_URL = http://host.docker.internal:<port>/llm
+                  │ worker ──Authorization: T──▶ proxy on serve
+                  │ bad dependency: reads T   │
+                  └───────────┬───────────────┘
+                              │ sends T out
+                              ▼
+            T at the gateway   → rejected (the gateway has never seen T)
+            T at serve's proxy → reachable only inside the trusted network,
+                                 and dead once the run ends
+```
+
+A backend calls `Register(runKey, endpoint)` at launch and gives the worker the
+returned token and `<container URL><prefix>`. The worker's calls to
+`POST <prefix>/chat/completions` and `GET <prefix>/models` carry the token; the
+proxy replaces it with the real bearer (none for a keyless upstream). The
+backend calls `Revoke(runKey)` on exit and on launch failure.
 
 ## Versioning policy
 

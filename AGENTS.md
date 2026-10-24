@@ -2,9 +2,9 @@
 
 Shared serve plumbing for the ContextMatrix backends `contextmatrix-agent`,
 `contextmatrix-chat` and `contextmatrix-architect`: webhook auth, task-skills
-resolution, the worker stdin frame codec, Prometheus metrics, and log
-streaming. This file is the contributor contract; `README.md` holds the
-design overview and package inventory.
+resolution, the worker stdin frame codec, Prometheus metrics, log
+streaming, and the per-run LLM proxy. This file is the contributor contract;
+`README.md` holds the design overview and package inventory.
 
 ## Boundary discipline
 
@@ -32,6 +32,8 @@ and the consuming backends (`contextmatrix-agent`, `contextmatrix-chat`,
 - `metrics` - the common Prometheus registry bundle, namespaced per backend.
 - `logbridge` - the fan-out hub and harness-event-to-`protocol.LogEntry`
   classifier. A backend can retain a per-key backlog replayed to a late consumer.
+- `llmproxy` - per-run stand-in token registry and the reverse proxy that swaps
+  in the real LLM bearer.
 
 ## Tests
 

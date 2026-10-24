@@ -48,7 +48,8 @@ func (sr *statusRecorder) Unwrap() http.ResponseWriter {
 // core's metrics bundle. A nil bundle makes it a pass-through. The endpoint
 // label is normalised through metrics.NormalizeEndpoint (unknown paths collapse
 // to "other") with the leading slash stripped so the label reads "trigger".
-// code is a coarse success / error / rate_limited bucket from the HTTP status.
+// code is a coarse success / error / rate_limited bucket from the HTTP status,
+// or aborted when the handler panicked (the panic is not recovered).
 func (c *Core) RecordMetrics(next http.HandlerFunc) http.HandlerFunc {
 	if c.metrics == nil {
 		return next
@@ -58,23 +59,33 @@ func (c *Core) RecordMetrics(next http.HandlerFunc) http.HandlerFunc {
 		start := time.Now()
 		sr := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 
+		completed := false
+
+		defer func() {
+			endpoint := c.metrics.NormalizeEndpoint(r.URL.Path)
+			if len(endpoint) > 0 && endpoint[0] == '/' {
+				endpoint = endpoint[1:]
+			}
+
+			code := "success"
+			if sr.status >= 400 {
+				code = "error"
+			}
+
+			if sr.status == http.StatusTooManyRequests {
+				code = "rate_limited"
+			}
+
+			if !completed {
+				code = "aborted"
+			}
+
+			c.metrics.WebhookRequestsTotal.WithLabelValues(endpoint, strconv.Itoa(sr.status), code).Inc()
+			c.metrics.WebhookRequestDuration.WithLabelValues(endpoint).Observe(time.Since(start).Seconds())
+		}()
+
 		next(sr, r)
 
-		endpoint := c.metrics.NormalizeEndpoint(r.URL.Path)
-		if len(endpoint) > 0 && endpoint[0] == '/' {
-			endpoint = endpoint[1:]
-		}
-
-		code := "success"
-		if sr.status >= 400 {
-			code = "error"
-		}
-
-		if sr.status == http.StatusTooManyRequests {
-			code = "rate_limited"
-		}
-
-		c.metrics.WebhookRequestsTotal.WithLabelValues(endpoint, strconv.Itoa(sr.status), code).Inc()
-		c.metrics.WebhookRequestDuration.WithLabelValues(endpoint).Observe(time.Since(start).Seconds())
+		completed = true
 	}
 }

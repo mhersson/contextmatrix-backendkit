@@ -94,6 +94,23 @@ func TestRecordMetrics_RateLimitedCode(t *testing.T) {
 	}
 }
 
+func TestRecordMetrics_AbortedHandlerIsCounted(t *testing.T) {
+	m := metrics.New("cm_agent", agentEndpoints)
+	c := NewCore(CoreConfig{APIKey: testAPIKey, Metrics: m})
+
+	h := c.RecordMetrics(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		panic(http.ErrAbortHandler)
+	})
+
+	r := httptest.NewRequest(http.MethodGet, "/health", nil)
+
+	assert.PanicsWithValue(t, http.ErrAbortHandler, func() { h(httptest.NewRecorder(), r) })
+
+	got := testutil.ToFloat64(m.WebhookRequestsTotal.WithLabelValues("health", "200", "aborted"))
+	assert.InEpsilon(t, float64(1), got, 1e-9)
+}
+
 func TestRecordMetrics_NilMetricsPassThrough(t *testing.T) {
 	c := NewCore(CoreConfig{APIKey: testAPIKey}) // no Metrics
 
