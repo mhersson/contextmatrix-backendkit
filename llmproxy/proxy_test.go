@@ -2,10 +2,13 @@ package llmproxy_test
 
 import (
 	"encoding/hex"
+	"encoding/pem"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -270,4 +273,57 @@ func TestMountedMetricsLabel(t *testing.T) {
 
 	got := testutil.ToFloat64(m.WebhookRequestsTotal.WithLabelValues("llm/chat/completions", "200", "success"))
 	assert.InEpsilon(t, float64(1), got, 1e-9)
+}
+
+func TestCACertFileTrustsPrivateUpstream(t *testing.T) {
+	up := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(up.Close)
+
+	caFile := filepath.Join(t.TempDir(), "ca.pem")
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: up.Certificate().Raw})
+	require.NoError(t, os.WriteFile(caFile, pemBytes, 0o600))
+
+	for _, tc := range []struct {
+		name   string
+		cfg    llmproxy.Config
+		status int
+	}{
+		{"with CA file", llmproxy.Config{CACertFile: caFile}, http.StatusOK},
+		{"without CA file", llmproxy.Config{}, http.StatusBadGateway},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newProxy(t, tc.cfg)
+			tok, err := p.Register("run", protocol.LLMEndpoint{Type: "openai", BaseURL: up.URL})
+			require.NoError(t, err)
+
+			resp := call(t, serve(t, p).URL, http.MethodGet, "/llm/models", tok, nil)
+			assert.Equal(t, tc.status, resp.StatusCode)
+		})
+	}
+}
+
+func TestNewRejectsBadCACertFile(t *testing.T) {
+	dir := t.TempDir()
+	noPEM := filepath.Join(dir, "empty.pem")
+	require.NoError(t, os.WriteFile(noPEM, []byte("not a certificate"), 0o600))
+
+	for _, path := range []string{filepath.Join(dir, "missing.pem"), noPEM} {
+		_, err := llmproxy.New(llmproxy.Config{Prefix: "/llm", CACertFile: path})
+		require.Error(t, err, "path %q", path)
+	}
+}
+
+func TestDialFailureIs502(t *testing.T) {
+	up := httptest.NewServer(http.NotFoundHandler())
+	base := up.URL
+	up.Close()
+
+	p := newProxy(t, llmproxy.Config{})
+	tok, err := p.Register("run", protocol.LLMEndpoint{Type: "openai", BaseURL: base})
+	require.NoError(t, err)
+
+	resp := call(t, serve(t, p).URL, http.MethodGet, "/llm/models", tok, nil)
+	assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
 }

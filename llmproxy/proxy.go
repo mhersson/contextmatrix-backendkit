@@ -2,12 +2,16 @@ package llmproxy
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -15,6 +19,8 @@ import (
 type Config struct {
 	// Prefix is the mount path, e.g. "/llm": leading slash, no trailing slash.
 	Prefix string
+	// CACertFile is a PEM bundle trusted for upstream TLS on top of the system pool.
+	CACertFile string
 	// Logger defaults to slog.Default().
 	Logger *slog.Logger
 }
@@ -40,14 +46,46 @@ func New(cfg Config) (*Proxy, error) {
 		log = slog.Default()
 	}
 
+	tr, _ := http.DefaultTransport.(*http.Transport)
+	tr = tr.Clone()
+	tr.MaxIdleConnsPerHost = 32
+
+	if cfg.CACertFile != "" {
+		pool, err := loadPool(cfg.CACertFile)
+		if err != nil {
+			return nil, err
+		}
+
+		tr.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	}
+
 	p := &Proxy{prefix: cfg.Prefix, log: log, reg: &registry{runs: map[string]*entry{}}}
 	p.rp = &httputil.ReverseProxy{
 		Rewrite:       p.rewrite,
+		Transport:     tr,
 		FlushInterval: -1,
 		ErrorHandler:  p.upstreamError,
 	}
 
 	return p, nil
+}
+
+func loadPool(path string) (*x509.CertPool, error) {
+	pemBytes, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return nil, fmt.Errorf("llmproxy: read CA file: %w", err)
+	}
+
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		pool = x509.NewCertPool()
+	}
+
+	if !pool.AppendCertsFromPEM(pemBytes) {
+		return nil, errors.New("llmproxy: CA file holds no PEM certificate")
+	}
+
+	return pool, nil
 }
 
 // Paths lists the endpoints the proxy serves, for the metrics allowlist.
@@ -102,7 +140,13 @@ func (p *Proxy) rewrite(pr *httputil.ProxyRequest) {
 }
 
 func (p *Proxy) upstreamError(w http.ResponseWriter, r *http.Request, err error) {
-	p.log.Warn("llm proxy upstream failure", "error", err, "path", r.URL.Path)
+	level := slog.LevelWarn
+	if errors.Is(err, context.Canceled) {
+		level = slog.LevelDebug
+	}
+
+	p.log.Log(r.Context(), level, "llm proxy upstream failure",
+		"run", r.Context().Value(ctxKey{}).(*entry).runKey, "path", r.URL.Path, "error", err)
 	writeError(w, http.StatusBadGateway, "upstream unavailable")
 }
 

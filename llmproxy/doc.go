@@ -29,6 +29,10 @@
 //     DrainGate, and put [Paths] on the metrics allowlist.
 //   - Revoke on container exit and on launch failure.
 //
+// Config.CACertFile adds a PEM bundle to the system roots for upstream TLS, and
+// the upstream connection honors HTTP_PROXY and HTTPS_PROXY from the serve
+// process environment.
+//
 // Only POST <prefix>/chat/completions and GET <prefix>/models reach the
 // upstream. Limits: Revoke stops new requests while a stream already in flight
 // runs to its end; the token is readable inside the container, so the run can

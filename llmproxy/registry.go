@@ -14,6 +14,7 @@ import (
 const defaultBaseURL = "https://openrouter.ai/api/v1"
 
 type entry struct {
+	runKey string
 	token  []byte
 	base   string
 	apiKey string
@@ -45,7 +46,7 @@ func (p *Proxy) Register(runKey string, up protocol.LLMEndpoint) (string, error)
 	tok := hex.EncodeToString(raw)
 
 	p.reg.mu.Lock()
-	p.reg.runs[runKey] = &entry{token: []byte(tok), base: base, apiKey: up.APIKey}
+	p.reg.runs[runKey] = &entry{runKey: runKey, token: []byte(tok), base: base, apiKey: up.APIKey}
 	p.reg.mu.Unlock()
 
 	return tok, nil
