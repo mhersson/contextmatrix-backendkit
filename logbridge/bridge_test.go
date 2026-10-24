@@ -242,6 +242,89 @@ func sharedRows() []mapRow {
 			},
 		},
 		{
+			name: "usage → gateway cost is carried",
+			line: makeEvent("usage", map[string]any{
+				"prompt_tokens":     float64(100),
+				"completion_tokens": float64(50),
+				"cost_usd":          float64(0.000123),
+				"model":             "usage-model",
+			}),
+			wantType:     "usage",
+			wantModel:    "usage-model",
+			wantAwaiting: 0,
+			wantUsage: &protocol.LogTokenUsage{
+				InputTokens:  100,
+				OutputTokens: 50,
+				CostUSD:      0.000123,
+			},
+		},
+		{
+			name: "usage → compaction call cost is carried",
+			line: makeEvent("usage", map[string]any{
+				"phase":             "compaction",
+				"prompt_tokens":     float64(2000),
+				"completion_tokens": float64(300),
+				"cost_usd":          float64(0.002),
+				"model":             "usage-model",
+			}),
+			wantType:     "usage",
+			wantModel:    "usage-model",
+			wantAwaiting: 0,
+			wantUsage: &protocol.LogTokenUsage{
+				InputTokens:  2000,
+				OutputTokens: 300,
+				CostUSD:      0.002,
+			},
+		},
+		{
+			name: "usage → reported zero cost stays zero",
+			line: makeEvent("usage", map[string]any{
+				"prompt_tokens":     float64(100),
+				"completion_tokens": float64(50),
+				"cost_usd":          float64(0),
+				"model":             "usage-model",
+			}),
+			wantType:     "usage",
+			wantModel:    "usage-model",
+			wantAwaiting: 0,
+			wantUsage: &protocol.LogTokenUsage{
+				InputTokens:  100,
+				OutputTokens: 50,
+			},
+		},
+		{
+			name: "usage → non-numeric cost reads as zero",
+			line: makeEvent("usage", map[string]any{
+				"prompt_tokens":     float64(100),
+				"completion_tokens": float64(50),
+				"cost_usd":          "0.01",
+				"model":             "usage-model",
+			}),
+			wantType:     "usage",
+			wantModel:    "usage-model",
+			wantAwaiting: 0,
+			wantUsage: &protocol.LogTokenUsage{
+				InputTokens:  100,
+				OutputTokens: 50,
+			},
+		},
+		{
+			name: "usage → negative cost reads as zero",
+			line: makeEvent("usage", map[string]any{
+				"prompt_tokens":     float64(100),
+				"completion_tokens": float64(50),
+				"cost_usd":          float64(-0.5),
+				"model":             "usage-model",
+			}),
+			wantType:     "usage",
+			wantModel:    "usage-model",
+			wantAwaiting: 0,
+			wantUsage: &protocol.LogTokenUsage{
+				InputTokens:  100,
+				OutputTokens: 50,
+			},
+		},
+		{
 			name: "state_change other → system + awaiting=false",
 			line: makeEvent("state_change", map[string]any{
 				"stop":  "done",
@@ -372,10 +455,7 @@ func assertCommon(t *testing.T, tt mapRow, got protocol.LogEntry) {
 
 	if tt.wantUsage != nil {
 		require.NotNil(t, got.Usage)
-		assert.Equal(t, tt.wantUsage.InputTokens, got.Usage.InputTokens)
-		assert.Equal(t, tt.wantUsage.OutputTokens, got.Usage.OutputTokens)
-		assert.Equal(t, tt.wantUsage.CacheReadTokens, got.Usage.CacheReadTokens)
-		assert.Equal(t, tt.wantUsage.CacheCreateTokens, got.Usage.CacheCreateTokens)
+		assert.Equal(t, *tt.wantUsage, *got.Usage)
 	}
 
 	if tt.checkContent != nil {

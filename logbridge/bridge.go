@@ -192,6 +192,9 @@ func (b *Bridge) mapEvent(kind string, data map[string]any) (entry protocol.LogE
 		outputTokens := int64Field(data, "completion_tokens")
 		cacheReadTokens := int64Field(data, "cache_read_tokens")
 		cacheCreateTokens := int64Field(data, "cache_creation_tokens")
+		// The wire promises a non-negative cost; 0 means the gateway reported
+		// none, so the consumer prices the call itself.
+		costUSD := positiveFloatField(data, "cost_usd")
 
 		return protocol.LogEntry{
 			Type:  "usage",
@@ -201,6 +204,7 @@ func (b *Bridge) mapEvent(kind string, data map[string]any) (entry protocol.LogE
 				OutputTokens:      outputTokens,
 				CacheReadTokens:   cacheReadTokens,
 				CacheCreateTokens: cacheCreateTokens,
+				CostUSD:           costUSD,
 			},
 		}, false, false
 
@@ -318,6 +322,16 @@ func int64Field(data map[string]any, key string) int64 {
 		return n
 	case int:
 		return int64(n)
+	}
+
+	return 0
+}
+
+// positiveFloatField extracts a JSON number from data, returning 0 if absent,
+// not numeric, or not greater than 0.
+func positiveFloatField(data map[string]any, key string) float64 {
+	if n, ok := data[key].(float64); ok && n > 0 {
+		return n
 	}
 
 	return 0
