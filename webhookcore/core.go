@@ -75,7 +75,7 @@ type CoreConfig struct {
 	WorkerImageRevision func(ctx context.Context) string
 }
 
-// Core is the shared HTTP transport surface both backends mount their lifecycle
+// Core is the shared HTTP transport surface every backend mounts its lifecycle
 // handlers onto: HMAC auth, the drain gate, request metrics, the SSE /logs
 // stream, and the health/readiness/images probes. It owns no goroutines beyond
 // the ones its handlers spawn; the replay janitor lives in its owner.
