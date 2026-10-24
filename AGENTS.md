@@ -1,23 +1,23 @@
 # AGENTS.md - ContextMatrix BackendKit
 
-Shared serve plumbing for the two ContextMatrix execution backends,
-`contextmatrix-agent` and `contextmatrix-chat`: webhook auth, task-skills
+Shared serve plumbing for the ContextMatrix backends `contextmatrix-agent`,
+`contextmatrix-chat` and `contextmatrix-architect`: webhook auth, task-skills
 resolution, the worker stdin frame codec, Prometheus metrics, and log
 streaming. This file is the contributor contract; `README.md` holds the
 design overview and package inventory.
 
 ## Boundary discipline
 
-This module owns the serve plumbing shared by the two backends and nothing
+This module owns the serve plumbing shared by the backends and nothing
 about *how* each backend uses it. Orchestration, protocol wire shape, and the
 inner agentic loop belong in `contextmatrix-protocol`, `contextmatrix-harness`,
-and the consuming backends (`contextmatrix-agent`, `contextmatrix-chat`)
-themselves, never here.
+and the consuming backends (`contextmatrix-agent`, `contextmatrix-chat`,
+`contextmatrix-architect`) themselves, never here.
 
 - Allowed imports: `contextmatrix-protocol`, `contextmatrix-harness/events`,
   `contextmatrix-harness/redact`, `prometheus/client_golang`, stdlib, and
-  `testify` in tests only. Forbidden: `contextmatrix`, `-agent`, `-chat`, and
-  any other external module.
+  `testify` in tests only. Forbidden: `contextmatrix`, `-agent`, `-chat`,
+  `-architect`, and any other external module.
 - CI (`make deps-gate`, `scripts/deps-gate.sh`) enforces the import allowlist
   above and rejects any forbidden repo dependency mechanically; keeping other
   external dependencies out is a review-enforced convention. An import that

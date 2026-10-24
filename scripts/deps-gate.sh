@@ -5,7 +5,7 @@
 set -euo pipefail
 
 bad_repo=$(go list -deps ./... \
-  | grep -E 'mhersson/(contextmatrix$|contextmatrix/|contextmatrix-agent|contextmatrix-chat|contextmatrix-runner|contextmatrix-githubauth)' || true)
+  | grep -E 'mhersson/(contextmatrix$|contextmatrix/|contextmatrix-agent|contextmatrix-chat|contextmatrix-architect|contextmatrix-runner|contextmatrix-githubauth)' || true)
 if [ -n "${bad_repo}" ]; then
   echo "FAIL: forbidden repo dependency:" >&2
   echo "${bad_repo}" >&2
