@@ -59,7 +59,7 @@ func (p *Proxy) Revoke(runKey string) {
 	p.reg.mu.Unlock()
 }
 
-// lookup scans every entry so timing does not reveal which token prefix matched.
+// lookup compares every entry in constant time so timing reveals neither a partial match nor which run matched.
 func (r *registry) lookup(token string) *entry {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

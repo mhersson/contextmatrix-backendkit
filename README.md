@@ -4,9 +4,10 @@ Shared serve plumbing for the ContextMatrix backends `contextmatrix-agent`,
 `contextmatrix-chat` and `contextmatrix-architect`. Agent and chat, the two
 execution backends, run a near-identical host service around
 `contextmatrix-harness` (webhook auth, task-skills resolution, the worker
-stdin frame codec, Prometheus metrics, log streaming, and the per-run LLM
-proxy); the architect mounts the same webhook core and log bridge. All three
-depend on one copy of this plumbing instead of their own.
+stdin frame codec, Prometheus metrics, and log streaming); the architect
+mounts the same webhook core and log bridge. All three depend on one copy of
+this plumbing instead of their own. The kit also holds `llmproxy`, the per-run
+LLM proxy intended for agent's and chat's serve.
 
 ## Architecture
 

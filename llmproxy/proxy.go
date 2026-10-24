@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Config configures a Proxy.
@@ -46,9 +48,19 @@ func New(cfg Config) (*Proxy, error) {
 		log = slog.Default()
 	}
 
-	tr, _ := http.DefaultTransport.(*http.Transport)
-	tr = tr.Clone()
-	tr.MaxIdleConnsPerHost = 32
+	tr := &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   32,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		// Every run shares the pooled connection, so a dead one must be
+		// detected before the worker's stall timeout.
+		HTTP2: &http.HTTP2Config{SendPingTimeout: 30 * time.Second},
+	}
 
 	if cfg.CACertFile != "" {
 		pool, err := loadPool(cfg.CACertFile)
@@ -65,6 +77,7 @@ func New(cfg Config) (*Proxy, error) {
 		Transport:     tr,
 		FlushInterval: -1,
 		ErrorHandler:  p.upstreamError,
+		ErrorLog:      slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
 
 	return p, nil
@@ -93,6 +106,9 @@ func Paths(prefix string) []string {
 	return []string{prefix + "/chat/completions", prefix + "/models"}
 }
 
+// ServeHTTP answers 401 to a request without a live token before any route
+// check; only POST <prefix>/chat/completions and GET <prefix>/models are
+// forwarded, anything else is 404.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 
