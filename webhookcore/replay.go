@@ -180,12 +180,12 @@ func (c *ReplayCache) StartJanitor() (stop func()) {
 
 // sweep removes every entry older than the TTL.
 func (c *ReplayCache) sweep() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.ttl <= 0 {
 		return
 	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	cutoff := c.now().Add(-c.ttl)
 

@@ -56,3 +56,18 @@ func TestNewCore_DefaultReplayTTLCoversSkew(t *testing.T) {
 		})
 	}
 }
+
+// TestNewCore_RaisesTTLWhileJanitorRuns covers a backend that starts the
+// cache's janitor before building the core: the TTL raise must not race it.
+func TestNewCore_RaisesTTLWhileJanitorRuns(t *testing.T) {
+	cache := NewReplayCache(time.Minute, 16, withReplaySweepInterval(time.Millisecond))
+	stop := cache.StartJanitor()
+
+	defer stop()
+
+	c := NewCore(CoreConfig{Skew: time.Minute, Replay: cache})
+
+	time.Sleep(20 * time.Millisecond)
+
+	assert.Equal(t, time.Minute+protocol.DefaultMaxFutureSkew, c.replay.ttl)
+}
