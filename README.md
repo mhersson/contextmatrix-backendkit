@@ -7,7 +7,7 @@ execution backends, run a near-identical host service around
 stdin frame codec, Prometheus metrics, and log streaming); the architect
 mounts the same webhook core and log bridge. All three depend on one copy of
 this plumbing instead of their own. The kit also holds `llmproxy`, the per-run
-LLM proxy intended for agent's and chat's serve.
+LLM proxy mounted by agent's and chat's serve.
 
 ## Architecture
 
@@ -42,7 +42,7 @@ instead of growing this list.
 | `webhookcore` | HMAC auth middleware, replay cache, the `/message` dedup cache, the SSE `/logs` handler, and the shared HTTP helpers (JSON decode/encode, health (the build and the default worker image's revision, read through an ImageLabeler the serve layer supplies), readyz, images) behind every backend's webhook server. |
 | `taskskills` | The signed-GET task-skills pointer fetch and shallow git clone shared by agent's and chat's worker provisioning. |
 | `frames` | The JSON Lines control-frame codec written to a worker container's stdin and read back by the work command, with the accepted frame-type set injected per backend. |
-| `metrics` | The common Prometheus registry bundle (go/process collectors plus the shared HTTP metrics) built from a per-backend namespace so existing metric names stay byte-identical. |
+| `metrics` | The common Prometheus registry bundle (go/process collectors plus the shared HTTP metrics) built from a per-backend namespace so each backend gets its own metric names. |
 | `logbridge` | The fan-out hub and harness-event-to-`protocol.LogEntry` classifier that streams worker output to the UI. A backend can retain a per-key backlog so entries published before its consumer connects are replayed to it. |
 | `llmproxy` | The per-run LLM proxy: a stand-in token registry and a reverse proxy that swaps in the real bearer, so workers never hold the LLM key; plus `ValidateContainerURL` and `WorkerBaseURL` for the worker-facing base URL. |
 
@@ -87,13 +87,7 @@ contract would be ceremony here.
 ## Verification
 
 ```bash
-go fix ./...
-make fmt
-make test
-make test-race
-make lint
-make deps-gate
-make build
+make fmt && make test && make test-race && make lint && make deps-gate && make build
 ```
 
 `make deps-gate` enforces the boundary: no dependency on any ContextMatrix

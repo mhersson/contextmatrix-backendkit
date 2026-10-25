@@ -9,8 +9,8 @@ import (
 
 // RedactorRegistry composes the log-bridge redactor from a single source of
 // truth so the masked-secret set stays consistent as secrets come and go: every
-// per-session CM-provisioned secret (the LLM key, protocol v0.5.0; the
-// git-credentials bearer, protocol v0.5.2), added at chat-start and removed on
+// per-session CM-provisioned secret (the LLM key and the
+// git-credentials bearer), added at chat-start and removed on
 // container exit. A session can register more than one secret - both features
 // are independent and commonly coexist - so each session ID maps to a SET of
 // keys, not a single value; a second AddSessionKey call for the same session

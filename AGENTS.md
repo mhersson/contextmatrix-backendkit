@@ -18,10 +18,11 @@ and the consuming backends (`contextmatrix-agent`, `contextmatrix-chat`,
   `contextmatrix-harness/redact`, `prometheus/client_golang`, stdlib, and
   `testify` in tests only. Forbidden: `contextmatrix`, `-agent`, `-chat`,
   `-architect`, and any other external module.
-- CI (`make deps-gate`, `scripts/deps-gate.sh`) enforces the import allowlist
-  above and rejects any forbidden repo dependency mechanically; keeping other
-  external dependencies out is a review-enforced convention. An import that
-  trips the gate means fix the design, not the gate.
+- CI (`make deps-gate`, `scripts/deps-gate.sh`) rejects any forbidden repo
+  dependency and any direct import in non-test code outside the allowlist
+  above. It does not list the transitive dependencies of the allowed modules
+  (for example prometheus); keeping those out is review-enforced. An import
+  that trips the gate means fix the design, not the gate.
 
 ## Package map
 
@@ -64,13 +65,7 @@ make fmt && make test && make test-race && make lint && make deps-gate && make b
 
 ## Commit discipline
 
-Run before every commit:
-
-```bash
-make test      # clean
-make lint      # clean
-make build     # builds
-```
+Run the Verification set above before every commit.
 
 - **Never commit to `main`.** Work on a feature branch; tasks of a plan or
   scope the user approved commit there without asking again. Never push
@@ -78,3 +73,4 @@ make build     # builds
 - Conventional commits: `type(scope): concise summary`. Always include a scope.
 - Body uses bullet points for the what and why - no long paragraphs.
 - Never reference plan phases, task numbers, or private card IDs in messages.
+- No session links in commits or PRs.
