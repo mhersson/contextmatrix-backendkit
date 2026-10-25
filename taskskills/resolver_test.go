@@ -350,10 +350,10 @@ func TestGitCloneShallowAndTokenNotPersisted(t *testing.T) {
 
 	work := t.TempDir()
 	runGit(work, "init", "-q", "-b", "main")
-	require.NoError(t, os.WriteFile(filepath.Join(work, "skill.md"), []byte("one"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(work, "skill.md"), []byte("one"), 0o600))
 	runGit(work, "add", ".")
 	runGit(work, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "-m", "one")
-	require.NoError(t, os.WriteFile(filepath.Join(work, "skill.md"), []byte("two"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(work, "skill.md"), []byte("two"), 0o600))
 	runGit(work, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "-am", "two")
 
 	bare := filepath.Join(t.TempDir(), "skills.git")

@@ -160,7 +160,7 @@ func (r *Resolver) fetchPointer(ctx context.Context) (protocol.TaskSkillsSource,
 // fetches the remote's default branch (HEAD). Resolve rejects dash-leading
 // gitURL and ref before calling it.
 func (r *Resolver) gitClone(ctx context.Context, gitURL, ref, dest, token string) error {
-	if err := os.MkdirAll(dest, 0o755); err != nil {
+	if err := os.MkdirAll(dest, 0o755); err != nil { //nolint:gosec // G301: the checkout is bind-mounted into worker containers, so it must be traversable by other users
 		return fmt.Errorf("mkdir skills dest: %w", err)
 	}
 
