@@ -9,8 +9,10 @@ import (
 )
 
 // TestNewCore_DefaultReplayTTLCoversSkew guards replay protection: a seen pair
-// must outlive the window in which its timestamp is still accepted. The skew
-// check runs on wall time, so the cache TTL is asserted directly.
+// must outlive the window in which its timestamp is still accepted. A pair
+// stamped up to DefaultMaxFutureSkew ahead stays valid until its timestamp plus
+// skew, so the default cache TTL is asserted to cover skew plus the future
+// allowance.
 func TestNewCore_DefaultReplayTTLCoversSkew(t *testing.T) {
 	tests := []struct {
 		name string
@@ -26,7 +28,7 @@ func TestNewCore_DefaultReplayTTLCoversSkew(t *testing.T) {
 			c := NewCore(CoreConfig{Skew: tt.skew})
 
 			assert.Equal(t, tt.want, c.skew)
-			assert.GreaterOrEqual(t, c.replay.ttl, c.skew)
+			assert.GreaterOrEqual(t, c.replay.ttl, c.skew+protocol.DefaultMaxFutureSkew)
 		})
 	}
 }

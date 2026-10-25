@@ -51,7 +51,7 @@ type CoreConfig struct {
 	MetricsToken string
 
 	Skew              time.Duration    // 0 -> protocol.DefaultMaxClockSkew
-	Replay            *ReplayCache     // nil -> NewReplayCache(skew, 4096)
+	Replay            *ReplayCache     // nil -> NewReplayCache(skew + future skew, 4096)
 	Draining          *atomic.Bool     // nil -> new
 	KeepaliveInterval time.Duration    // <=0 -> 15s default
 	Metrics           *metrics.Metrics // nil disables instrumentation
@@ -130,7 +130,7 @@ func NewCore(cfg CoreConfig) *Core {
 
 	replay := cfg.Replay
 	if replay == nil {
-		replay = NewReplayCache(skew, 4096)
+		replay = NewReplayCache(skew+protocol.DefaultMaxFutureSkew, 4096)
 	}
 
 	draining := cfg.Draining
