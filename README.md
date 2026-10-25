@@ -44,7 +44,7 @@ instead of growing this list.
 | `frames` | The JSON Lines control-frame codec written to a worker container's stdin and read back by the work command, with the accepted frame-type set injected per backend. |
 | `metrics` | The common Prometheus registry bundle (go/process collectors plus the shared HTTP metrics) built from a per-backend namespace so existing metric names stay byte-identical. |
 | `logbridge` | The fan-out hub and harness-event-to-`protocol.LogEntry` classifier that streams worker output to the UI. A backend can retain a per-key backlog so entries published before its consumer connects are replayed to it. |
-| `llmproxy` | The per-run LLM proxy: a stand-in token registry and a reverse proxy that swaps in the real bearer, so workers never hold the LLM key. |
+| `llmproxy` | The per-run LLM proxy: a stand-in token registry and a reverse proxy that swaps in the real bearer, so workers never hold the LLM key; plus `ValidateContainerURL` and `WorkerBaseURL` for the worker-facing base URL. |
 
 ## llmproxy
 
@@ -70,7 +70,8 @@ instead of growing this list.
 ```
 
 A backend calls `Register(runKey, endpoint)` at launch and gives the worker the
-returned token and `<container URL><prefix>`. The worker's calls to
+returned token and `WorkerBaseURL(containerURL, port, prefix)`, after checking
+the configured container URL with `ValidateContainerURL`. The worker's calls to
 `POST <prefix>/chat/completions` and `GET <prefix>/models` carry the token; the
 proxy replaces it with the real bearer (none for a keyless upstream). The
 backend calls `Revoke(runKey)` on exit and on launch failure.

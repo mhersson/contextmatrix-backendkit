@@ -24,7 +24,8 @@
 //
 // Wiring:
 //   - Register at launch, keyed by run, with the run's [protocol.LLMEndpoint].
-//   - Give the worker the token and "<container URL><prefix>" as its LLM base URL.
+//   - Give the worker the token and [WorkerBaseURL] as its LLM base URL, and check
+//     the backend's container URL config with [ValidateContainerURL].
 //   - Mount prefix+"/" wrapped only in RecordMetrics, outside Auth and
 //     DrainGate, and put [Paths] on the metrics allowlist.
 //   - Revoke on container exit and on launch failure.
