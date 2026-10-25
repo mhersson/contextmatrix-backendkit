@@ -85,6 +85,17 @@ func NewReplayCache(ttl time.Duration, capacity int, opts ...replayCacheOption) 
 	return c
 }
 
+// ensureMinTTL raises the TTL to at least floor. It never lowers a TTL and leaves
+// a TTL <= 0 (no expiry) alone. The mutex guards against the janitor reading ttl.
+func (c *ReplayCache) ensureMinTTL(floor time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.ttl > 0 && c.ttl < floor {
+		c.ttl = floor
+	}
+}
+
 // replaySweepInterval picks min(ttl/2, 60s) so a small skew window is swept
 // proportionally faster than a flat tick would allow. A non-positive TTL still
 // returns the ceiling so the janitor has a meaningful interval to honour stop

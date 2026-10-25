@@ -13,6 +13,30 @@ import (
 // stamped up to DefaultMaxFutureSkew ahead stays valid until its timestamp plus
 // skew, so the default cache TTL is asserted to cover skew plus the future
 // allowance.
+func TestNewCore_SuppliedReplayTTLIsRaisedToFloor(t *testing.T) {
+	const skew = 5 * time.Minute
+
+	floor := skew + protocol.DefaultMaxFutureSkew
+
+	tests := []struct {
+		name string
+		ttl  time.Duration
+		want time.Duration
+	}{
+		{"equal to skew is raised", skew, floor},
+		{"longer is kept", time.Hour, time.Hour},
+		{"no expiry stays no expiry", 0, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewCore(CoreConfig{Skew: skew, Replay: NewReplayCache(tt.ttl, 16)})
+
+			assert.Equal(t, tt.want, c.replay.ttl)
+		})
+	}
+}
+
 func TestNewCore_DefaultReplayTTLCoversSkew(t *testing.T) {
 	tests := []struct {
 		name string

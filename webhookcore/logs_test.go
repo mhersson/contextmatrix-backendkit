@@ -234,8 +234,6 @@ func TestLogs_Filter(t *testing.T) {
 				}
 			}, time.Second, 5*time.Millisecond)
 
-			time.Sleep(10 * time.Millisecond)
-
 			// A frame for a different key must NOT be delivered.
 			other := protocol.LogEntry{Type: "text", Content: "other-key"}
 			m.setKey(&other, "other")
