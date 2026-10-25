@@ -9,10 +9,12 @@
 # vacuously.
 set -euo pipefail
 
+cd "$(dirname "$0")/.."
+
 mod="github.com/mhersson/contextmatrix-backendkit"
 
 # Standalone assignments so set -e aborts when go list itself fails.
-all_deps=$(go list -deps ./...)
+all_deps=$(go list -deps -test ./...)
 bad_repo=$(printf '%s\n' "${all_deps}" \
   | grep -E 'mhersson/(contextmatrix$|contextmatrix/|contextmatrix-agent|contextmatrix-chat|contextmatrix-architect)' || true)
 if [ -n "${bad_repo}" ]; then
