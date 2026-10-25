@@ -522,7 +522,7 @@ func TestMappingTable(t *testing.T) {
 				select {
 				case got = <-ch:
 				default:
-					t.Fatal("expected entry but got none (timeout)")
+					t.Fatal("expected entry but got none")
 				}
 
 				assertCommon(t, tt, got)
@@ -580,7 +580,7 @@ func TestMappingTable(t *testing.T) {
 				select {
 				case got = <-ch:
 				default:
-					t.Fatal("expected entry but got none (timeout)")
+					t.Fatal("expected entry but got none")
 				}
 
 				assertCommon(t, tt, got)
@@ -636,7 +636,7 @@ func TestRunStateMapping(t *testing.T) {
 			select {
 			case got = <-ch:
 			default:
-				t.Fatal("expected a status frame but got none (timeout)")
+				t.Fatal("expected a status frame but got none")
 			}
 
 			assert.Equal(t, "status", got.Type)
@@ -668,7 +668,7 @@ func TestRunStateDoesNotOverrideAwaitingHuman(t *testing.T) {
 	select {
 	case got = <-ch:
 	default:
-		t.Fatal("expected an entry (timeout)")
+		t.Fatal("expected an entry")
 	}
 
 	assert.Equal(t, "system", got.Type)
@@ -792,7 +792,7 @@ func TestRedaction(t *testing.T) {
 		case got := <-ch:
 			assert.NotContains(t, got.Content, secret)
 			assert.Contains(t, got.Content, "[REDACTED]")
-		case <-time.After(100 * time.Millisecond):
+		default:
 			t.Fatal("expected entry")
 		}
 	})
@@ -808,7 +808,7 @@ func TestRedaction(t *testing.T) {
 			assert.Equal(t, "thinking", got.Type)
 			assert.NotContains(t, got.Content, secret)
 			assert.Contains(t, got.Content, "[REDACTED]")
-		case <-time.After(100 * time.Millisecond):
+		default:
 			t.Fatal("expected entry")
 		}
 	})
@@ -820,7 +820,7 @@ func TestRedaction(t *testing.T) {
 		case got := <-ch:
 			assert.NotContains(t, got.Content, secret)
 			assert.Contains(t, got.Content, "[REDACTED]")
-		case <-time.After(100 * time.Millisecond):
+		default:
 			t.Fatal("expected entry")
 		}
 	})
@@ -832,7 +832,7 @@ func TestRedaction(t *testing.T) {
 		case got := <-ch:
 			assert.NotContains(t, got.Content, secret)
 			assert.Contains(t, got.Content, "[REDACTED]")
-		case <-time.After(100 * time.Millisecond):
+		default:
 			t.Fatal("expected entry")
 		}
 	})
@@ -875,8 +875,8 @@ func TestDiscussionMapping(t *testing.T) {
 		var got protocol.LogEntry
 		select {
 		case got = <-ch:
-		case <-time.After(100 * time.Millisecond):
-			t.Fatal("expected a bridged discussion entry (timeout)")
+		default:
+			t.Fatal("expected a bridged discussion entry")
 		}
 
 		assert.Equal(t, "text", got.Type)
@@ -898,8 +898,8 @@ func TestDiscussionMapping(t *testing.T) {
 		var got protocol.LogEntry
 		select {
 		case got = <-ch:
-		case <-time.After(100 * time.Millisecond):
-			t.Fatal("expected a bridged discussion entry (timeout)")
+		default:
+			t.Fatal("expected a bridged discussion entry")
 		}
 
 		assert.Equal(t, "human", got.Agent)
@@ -918,7 +918,7 @@ func TestDiscussionMapping(t *testing.T) {
 		select {
 		case e := <-ch:
 			t.Errorf("seat_debug must not be bridged; got type=%q", e.Type)
-		case <-time.After(30 * time.Millisecond):
+		default:
 		}
 	})
 }
