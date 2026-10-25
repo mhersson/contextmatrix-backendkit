@@ -49,7 +49,8 @@ type Bridge struct {
 }
 
 // BridgeConfig configures a Bridge. Redactor may be nil (no redaction) and is
-// swappable via setRedactor. OnAwaiting fires after every non-stderr publish; a
+// replaced by a RedactorRegistry built on the bridge
+// (NewRedactorRegistry installs its own at once). OnAwaiting fires after every non-stderr publish; a
 // nil OnAwaiting never fires. SurfaceAwaitingHuman decides whether an
 // awaiting_human state change becomes a system entry that arms the flag (agent)
 // or is skipped entirely (chat). MapExtra classifies event kinds the shared

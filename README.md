@@ -91,5 +91,6 @@ make fmt && make test && make test-race && make lint && make deps-gate && make b
 ```
 
 `make deps-gate` enforces the boundary: no dependency on any ContextMatrix
-backend or server repo, and `contextmatrix-harness` usage confined to
-`events` and `redact`.
+backend or server repo, `contextmatrix-harness` usage confined to
+`events` and `redact`, and non-test code importing directly only the stdlib,
+this module, protocol, harness `events`/`redact` and `prometheus/client_golang`.

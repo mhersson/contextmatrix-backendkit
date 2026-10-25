@@ -65,4 +65,6 @@ func TestWorkerBaseURL(t *testing.T) {
 		llmproxy.WorkerBaseURL("https://serve.internal:8443", 19092, llmproxy.DefaultPrefix))
 	assert.Equal(t, "https://serve.internal:8443/llm",
 		llmproxy.WorkerBaseURL("https://serve.internal:8443/", 19092, llmproxy.DefaultPrefix))
+	assert.Equal(t, "http://host.docker.internal:19092/proxy",
+		llmproxy.WorkerBaseURL("", 19092, "/proxy"), "the prefix is appended as given")
 }
