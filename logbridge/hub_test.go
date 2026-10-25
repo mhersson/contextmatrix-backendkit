@@ -30,7 +30,7 @@ func TestHubSubscribers(t *testing.T) {
 			select {
 			case got := <-ch:
 				assert.Equal(t, "proj-a", got.Project)
-			case <-time.After(100 * time.Millisecond):
+			default:
 				t.Fatal("expected entry")
 			}
 		})
@@ -47,7 +47,7 @@ func TestHubSubscribers(t *testing.T) {
 			select {
 			case got := <-chA:
 				assert.Equal(t, "proj-a", got.Project)
-			case <-time.After(100 * time.Millisecond):
+			default:
 				t.Fatal("proj-a subscriber did not receive")
 			}
 
@@ -55,7 +55,7 @@ func TestHubSubscribers(t *testing.T) {
 			select {
 			case e := <-chB:
 				t.Errorf("proj-b received unexpected entry: %+v", e)
-			case <-time.After(30 * time.Millisecond):
+			default:
 				// correct: no delivery
 			}
 		})
@@ -119,7 +119,7 @@ func TestHubSubscribers(t *testing.T) {
 			case got := <-ch:
 				assert.Equal(t, "user", got.Type)
 				assert.Contains(t, got.Content, secret, "user content must NOT be redacted")
-			case <-time.After(100 * time.Millisecond):
+			default:
 				t.Fatal("expected user entry")
 			}
 		})
@@ -140,7 +140,7 @@ func TestHubSubscribers(t *testing.T) {
 			select {
 			case got := <-ch:
 				assert.Equal(t, "sess-a", got.SessionID)
-			case <-time.After(100 * time.Millisecond):
+			default:
 				t.Fatal("expected entry")
 			}
 		})
@@ -157,7 +157,7 @@ func TestHubSubscribers(t *testing.T) {
 			select {
 			case got := <-chA:
 				assert.Equal(t, "sess-a", got.SessionID)
-			case <-time.After(100 * time.Millisecond):
+			default:
 				t.Fatal("sess-a subscriber did not receive")
 			}
 
@@ -165,7 +165,7 @@ func TestHubSubscribers(t *testing.T) {
 			select {
 			case e := <-chB:
 				t.Errorf("sess-b received unexpected entry: %+v", e)
-			case <-time.After(30 * time.Millisecond):
+			default:
 				// correct: no delivery
 			}
 		})
@@ -226,7 +226,7 @@ func drain(t *testing.T, ch <-chan protocol.LogEntry, want int) []string {
 		select {
 		case e := <-ch:
 			out = append(out, e.Content)
-		case <-time.After(200 * time.Millisecond):
+		default:
 			t.Fatalf("got %d entries, want %d", len(out), want)
 		}
 	}
@@ -240,7 +240,7 @@ func assertNone(t *testing.T, ch <-chan protocol.LogEntry) {
 	select {
 	case e := <-ch:
 		t.Fatalf("unexpected entry %q", e.Content)
-	case <-time.After(30 * time.Millisecond):
+	default:
 	}
 }
 
@@ -263,6 +263,22 @@ func TestHubRetain(t *testing.T) {
 		hub.Publish(entry("c"))
 
 		assert.Equal(t, []string{"a", "b", "c"}, drain(t, ch, 3))
+		assertNone(t, ch)
+	})
+
+	t.Run("a replayed backlog is not replayed to a later subscriber", func(t *testing.T) {
+		t.Parallel()
+
+		hub := logbridge.NewHub(sessionKey, nil)
+		hub.Retain("s1")
+		hub.Publish(entry("a"))
+
+		first, ch := hub.Subscribe("s1")
+		assert.Equal(t, []string{"a"}, drain(t, ch, 1))
+		hub.Unsubscribe(first)
+
+		_, again := hub.Subscribe("s1")
+		assertNone(t, again)
 	})
 
 	t.Run("without retain nothing is kept", func(t *testing.T) {
@@ -413,5 +429,36 @@ func TestHubRetain(t *testing.T) {
 
 		assert.Equal(t, []string{"a"}, drain(t, other, 1))
 		assertNone(t, other)
+
+		_, third := hub.Subscribe("s1")
+		assertNone(t, third)
+	})
+
+	t.Run("a requeue past the cap keeps the newest and drops the oldest", func(t *testing.T) {
+		t.Parallel()
+
+		obs := &countingDrops{}
+		hub := logbridge.NewHub(sessionKey, obs)
+		hub.Retain("s1")
+
+		for i := range 256 {
+			hub.Publish(entry(fmt.Sprintf("%d", i)))
+		}
+
+		id, _ := hub.Subscribe("s1")
+
+		for i := 256; i < 261; i++ {
+			hub.Publish(entry(fmt.Sprintf("%d", i)))
+		}
+
+		assert.Zero(t, obs.n)
+		hub.Unsubscribe(id)
+		assert.Equal(t, 5, obs.n, "each trimmed entry is observed")
+
+		_, ch := hub.Subscribe("s1")
+		got := drain(t, ch, 256)
+		assert.Equal(t, "5", got[0], "the oldest entries were dropped")
+		assert.Equal(t, "260", got[255])
+		assertNone(t, ch)
 	})
 }

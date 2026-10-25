@@ -508,7 +508,7 @@ func TestMappingTable(t *testing.T) {
 					select {
 					case e := <-ch:
 						t.Errorf("expected skip but got entry with type=%q", e.Type)
-					case <-time.After(30 * time.Millisecond):
+					default:
 					}
 
 					if tt.wantAwaiting == -1 {
@@ -521,7 +521,7 @@ func TestMappingTable(t *testing.T) {
 				var got protocol.LogEntry
 				select {
 				case got = <-ch:
-				case <-time.After(100 * time.Millisecond):
+				default:
 					t.Fatal("expected entry but got none (timeout)")
 				}
 
@@ -570,7 +570,7 @@ func TestMappingTable(t *testing.T) {
 					select {
 					case e := <-ch:
 						t.Errorf("expected skip but got entry with type=%q", e.Type)
-					case <-time.After(30 * time.Millisecond):
+					default:
 					}
 
 					return
@@ -579,7 +579,7 @@ func TestMappingTable(t *testing.T) {
 				var got protocol.LogEntry
 				select {
 				case got = <-ch:
-				case <-time.After(100 * time.Millisecond):
+				default:
 					t.Fatal("expected entry but got none (timeout)")
 				}
 
@@ -635,7 +635,7 @@ func TestRunStateMapping(t *testing.T) {
 			var got protocol.LogEntry
 			select {
 			case got = <-ch:
-			case <-time.After(100 * time.Millisecond):
+			default:
 				t.Fatal("expected a status frame but got none (timeout)")
 			}
 
@@ -667,7 +667,7 @@ func TestRunStateDoesNotOverrideAwaitingHuman(t *testing.T) {
 	var got protocol.LogEntry
 	select {
 	case got = <-ch:
-	case <-time.After(100 * time.Millisecond):
+	default:
 		t.Fatal("expected an entry (timeout)")
 	}
 
@@ -693,7 +693,7 @@ func TestStderrStream(t *testing.T) {
 	var got protocol.LogEntry
 	select {
 	case got = <-ch:
-	case <-time.After(100 * time.Millisecond):
+	default:
 		t.Fatal("expected entry but got none")
 	}
 
