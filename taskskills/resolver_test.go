@@ -325,8 +325,8 @@ func TestResolveTokenExpiresAtAbsentMalformed(t *testing.T) {
 }
 
 // TestGitCloneShallowAndTokenNotPersisted runs the real clone path against a
-// local bare repo and checks the token reaches git only through the process
-// env: it must not land anywhere under the checkout's .git.
+// local bare repo and checks the token is not persisted anywhere under the
+// checkout's .git.
 func TestGitCloneShallowAndTokenNotPersisted(t *testing.T) {
 	gitBin, err := exec.LookPath("git")
 	if err != nil {
@@ -337,6 +337,15 @@ func TestGitCloneShallowAndTokenNotPersisted(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+	// Inherited repo-location variables (e.g. from a git hook) would aim the fixture at the caller's repo.
+	for _, k := range []string{
+		"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
+		"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX",
+	} {
+		t.Setenv(k, "")
+		require.NoError(t, os.Unsetenv(k))
+	}
 
 	runGit := func(dir string, args ...string) {
 		t.Helper()
