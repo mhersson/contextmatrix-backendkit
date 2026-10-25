@@ -922,39 +922,3 @@ func TestDiscussionMapping(t *testing.T) {
 		}
 	})
 }
-
-// TestSetRedactorAppliesToSubsequentLines verifies that swapping the redactor
-// via SetRedactor takes effect for lines bridged after the swap and fully
-// replaces (not merges with) the prior redactor - matching the
-// RedactorRegistry rebuilding the redactor on every session add/remove.
-func TestSetRedactorAppliesToSubsequentLines(t *testing.T) {
-	t.Parallel()
-
-	hub := logbridge.NewHub(func(e protocol.LogEntry) string { return e.SessionID }, nil)
-	_, ch := hub.Subscribe("")
-	bridge := logbridge.NewBridge(logbridge.BridgeConfig{
-		Hub:      hub,
-		Redactor: redact.New([]string{"initial-secret-val"}),
-	})
-
-	key := logbridge.Key{SessionID: testSession}
-
-	bridge.BridgeLine(key, []byte("leaked initial-secret-val here"), true)
-
-	got := <-ch
-	assert.Equal(t, "leaked [REDACTED] here", got.Content)
-
-	bridge.SetRedactor(redact.New([]string{"rotated-secret-val"}))
-
-	bridge.BridgeLine(key, []byte("leaked rotated-secret-val here"), true)
-
-	got = <-ch
-	assert.Equal(t, "leaked [REDACTED] here", got.Content)
-
-	// Old secret no longer masked once the redactor is swapped: proves a full
-	// replace, not a merge.
-	bridge.BridgeLine(key, []byte("leaked initial-secret-val here"), true)
-
-	got = <-ch
-	assert.Equal(t, "leaked initial-secret-val here", got.Content)
-}

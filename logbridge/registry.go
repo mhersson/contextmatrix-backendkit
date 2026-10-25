@@ -90,7 +90,7 @@ func (r *RedactorRegistry) rebuild() {
 
 	redactor := redact.New(all)
 	r.redactor.Store(redactor)
-	r.bridge.SetRedactor(redactor)
+	r.bridge.setRedactor(redactor)
 }
 
 // RedactLine applies the registry's current composed redactor to line and
