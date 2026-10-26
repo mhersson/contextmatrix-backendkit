@@ -9,12 +9,10 @@ import (
 
 // RedactorRegistry composes the log-bridge redactor from a single source of
 // truth so the masked-secret set stays consistent as secrets come and go: every
-// per-session CM-provisioned secret (the LLM key, protocol v0.5.0; the
-// git-credentials bearer, protocol v0.5.2), added at chat-start and removed on
-// container exit. A session can register more than one secret - both features
-// are independent and commonly coexist - so each session ID maps to a SET of
-// keys, not a single value; a second AddSessionKey call for the same session
-// must not displace the first.
+// per-session secret a backend registers, added when the session starts and
+// removed on container exit. A session can register several, so each session ID
+// maps to a SET of keys; a second AddSessionKey call for the same session must
+// not displace the first.
 //
 // Worker stderr and unparsable stdout (e.g. a panic stack trace) reach the
 // /logs stream with only this redactor applied - the in-worker redactor covers
@@ -90,7 +88,7 @@ func (r *RedactorRegistry) rebuild() {
 
 	redactor := redact.New(all)
 	r.redactor.Store(redactor)
-	r.bridge.SetRedactor(redactor)
+	r.bridge.setRedactor(redactor)
 }
 
 // RedactLine applies the registry's current composed redactor to line and

@@ -8,10 +8,10 @@ import (
 	protocol "github.com/mhersson/contextmatrix-protocol"
 )
 
-// MaxRequestBodyBytes caps the body the auth middleware reads before HMAC
+// maxRequestBodyBytes caps the body the auth middleware reads before HMAC
 // verification. ContextMatrix caps /message content well under this; a larger
 // body is a misbehaving or hostile client.
-const MaxRequestBodyBytes = 1 << 20 // 1 MiB
+const maxRequestBodyBytes = 1 << 20 // 1 MiB
 
 // writeUnauthorized returns the single fixed 401 shape for every authentication
 // failure. The specific cause is logged in Auth, never echoed to the client.

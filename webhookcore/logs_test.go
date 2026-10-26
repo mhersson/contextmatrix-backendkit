@@ -128,9 +128,8 @@ func TestLogs_SSEStream(t *testing.T) {
 			// 1. The connected comment must arrive immediately.
 			readUntil(func(s string) bool { return s == ": connected" }, "connected comment")
 
-			// Give the subscription a beat, then publish a frame.
-			time.Sleep(10 * time.Millisecond)
-
+			// The handler subscribes before writing the connected comment, so
+			// a frame published right after reading it must reach the stream.
 			entry := protocol.LogEntry{
 				Timestamp: time.Now(),
 				Type:      "text",
@@ -234,8 +233,6 @@ func TestLogs_Filter(t *testing.T) {
 					return false
 				}
 			}, time.Second, 5*time.Millisecond)
-
-			time.Sleep(10 * time.Millisecond)
 
 			// A frame for a different key must NOT be delivered.
 			other := protocol.LogEntry{Type: "text", Content: "other-key"}

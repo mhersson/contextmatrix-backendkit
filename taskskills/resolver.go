@@ -157,15 +157,10 @@ func (r *Resolver) fetchPointer(ctx context.Context) (protocol.TaskSkillsSource,
 // gitClone does a one-shot shallow fetch+checkout of ref (a SHA, branch, or tag)
 // into dest, authenticating with a per-invocation token passed as an
 // http.extraheader via the subprocess env (see gitAuthEnv). When ref is empty it
-// fetches the remote's default branch (HEAD).
+// fetches the remote's default branch (HEAD). Resolve rejects dash-leading
+// gitURL and ref before calling it.
 func (r *Resolver) gitClone(ctx context.Context, gitURL, ref, dest, token string) error {
-	// Reject dash-leading args before any exec: git interprets them as flags.
-	// Both gitURL and ref are CM-sourced config that must not be option strings.
-	if strings.HasPrefix(gitURL, "-") || strings.HasPrefix(ref, "-") {
-		return fmt.Errorf("git clone: url and ref must not begin with '-' (got url=%q ref=%q)", gitURL, ref)
-	}
-
-	if err := os.MkdirAll(dest, 0o755); err != nil {
+	if err := os.MkdirAll(dest, 0o755); err != nil { //nolint:gosec // G301: the checkout is bind-mounted into worker containers, so it must be traversable by other users
 		return fmt.Errorf("mkdir skills dest: %w", err)
 	}
 
@@ -178,7 +173,7 @@ func (r *Resolver) gitClone(ctx context.Context, gitURL, ref, dest, token string
 		{"init", "-q"},
 		{"remote", "add", "origin", gitURL},
 		// '--' separates options from the ref spec so a ref that looks like a
-		// flag is passed as a positional argument. Mirrors run.go's clone guard.
+		// flag is passed as a positional argument.
 		{"fetch", "--depth", "1", "origin", "--", fetchRef},
 		{"checkout", "-q", "FETCH_HEAD"},
 	}

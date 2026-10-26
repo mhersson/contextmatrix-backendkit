@@ -3,22 +3,21 @@ package logbridge_test
 import (
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/mhersson/contextmatrix-backendkit/logbridge"
 	protocol "github.com/mhersson/contextmatrix-protocol"
 	"github.com/stretchr/testify/assert"
 )
 
-// recvEntry drains one published entry or fails on timeout.
+// recvEntry drains one published entry or fails if none is queued.
 func recvEntry(t *testing.T, ch <-chan protocol.LogEntry) protocol.LogEntry {
 	t.Helper()
 
 	select {
 	case e := <-ch:
 		return e
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("expected a bridged entry but got none (timeout)")
+	default:
+		t.Fatal("expected a bridged entry but got none")
 
 		return protocol.LogEntry{}
 	}

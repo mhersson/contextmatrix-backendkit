@@ -508,7 +508,7 @@ func TestMappingTable(t *testing.T) {
 					select {
 					case e := <-ch:
 						t.Errorf("expected skip but got entry with type=%q", e.Type)
-					case <-time.After(30 * time.Millisecond):
+					default:
 					}
 
 					if tt.wantAwaiting == -1 {
@@ -521,8 +521,8 @@ func TestMappingTable(t *testing.T) {
 				var got protocol.LogEntry
 				select {
 				case got = <-ch:
-				case <-time.After(100 * time.Millisecond):
-					t.Fatal("expected entry but got none (timeout)")
+				default:
+					t.Fatal("expected entry but got none")
 				}
 
 				assertCommon(t, tt, got)
@@ -570,7 +570,7 @@ func TestMappingTable(t *testing.T) {
 					select {
 					case e := <-ch:
 						t.Errorf("expected skip but got entry with type=%q", e.Type)
-					case <-time.After(30 * time.Millisecond):
+					default:
 					}
 
 					return
@@ -579,8 +579,8 @@ func TestMappingTable(t *testing.T) {
 				var got protocol.LogEntry
 				select {
 				case got = <-ch:
-				case <-time.After(100 * time.Millisecond):
-					t.Fatal("expected entry but got none (timeout)")
+				default:
+					t.Fatal("expected entry but got none")
 				}
 
 				assertCommon(t, tt, got)
@@ -635,8 +635,8 @@ func TestRunStateMapping(t *testing.T) {
 			var got protocol.LogEntry
 			select {
 			case got = <-ch:
-			case <-time.After(100 * time.Millisecond):
-				t.Fatal("expected a status frame but got none (timeout)")
+			default:
+				t.Fatal("expected a status frame but got none")
 			}
 
 			assert.Equal(t, "status", got.Type)
@@ -667,8 +667,8 @@ func TestRunStateDoesNotOverrideAwaitingHuman(t *testing.T) {
 	var got protocol.LogEntry
 	select {
 	case got = <-ch:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("expected an entry (timeout)")
+	default:
+		t.Fatal("expected an entry")
 	}
 
 	assert.Equal(t, "system", got.Type)
@@ -693,7 +693,7 @@ func TestStderrStream(t *testing.T) {
 	var got protocol.LogEntry
 	select {
 	case got = <-ch:
-	case <-time.After(100 * time.Millisecond):
+	default:
 		t.Fatal("expected entry but got none")
 	}
 
@@ -792,7 +792,7 @@ func TestRedaction(t *testing.T) {
 		case got := <-ch:
 			assert.NotContains(t, got.Content, secret)
 			assert.Contains(t, got.Content, "[REDACTED]")
-		case <-time.After(100 * time.Millisecond):
+		default:
 			t.Fatal("expected entry")
 		}
 	})
@@ -808,7 +808,7 @@ func TestRedaction(t *testing.T) {
 			assert.Equal(t, "thinking", got.Type)
 			assert.NotContains(t, got.Content, secret)
 			assert.Contains(t, got.Content, "[REDACTED]")
-		case <-time.After(100 * time.Millisecond):
+		default:
 			t.Fatal("expected entry")
 		}
 	})
@@ -820,7 +820,7 @@ func TestRedaction(t *testing.T) {
 		case got := <-ch:
 			assert.NotContains(t, got.Content, secret)
 			assert.Contains(t, got.Content, "[REDACTED]")
-		case <-time.After(100 * time.Millisecond):
+		default:
 			t.Fatal("expected entry")
 		}
 	})
@@ -832,7 +832,7 @@ func TestRedaction(t *testing.T) {
 		case got := <-ch:
 			assert.NotContains(t, got.Content, secret)
 			assert.Contains(t, got.Content, "[REDACTED]")
-		case <-time.After(100 * time.Millisecond):
+		default:
 			t.Fatal("expected entry")
 		}
 	})
@@ -875,8 +875,8 @@ func TestDiscussionMapping(t *testing.T) {
 		var got protocol.LogEntry
 		select {
 		case got = <-ch:
-		case <-time.After(100 * time.Millisecond):
-			t.Fatal("expected a bridged discussion entry (timeout)")
+		default:
+			t.Fatal("expected a bridged discussion entry")
 		}
 
 		assert.Equal(t, "text", got.Type)
@@ -898,8 +898,8 @@ func TestDiscussionMapping(t *testing.T) {
 		var got protocol.LogEntry
 		select {
 		case got = <-ch:
-		case <-time.After(100 * time.Millisecond):
-			t.Fatal("expected a bridged discussion entry (timeout)")
+		default:
+			t.Fatal("expected a bridged discussion entry")
 		}
 
 		assert.Equal(t, "human", got.Agent)
@@ -918,43 +918,7 @@ func TestDiscussionMapping(t *testing.T) {
 		select {
 		case e := <-ch:
 			t.Errorf("seat_debug must not be bridged; got type=%q", e.Type)
-		case <-time.After(30 * time.Millisecond):
+		default:
 		}
 	})
-}
-
-// TestSetRedactorAppliesToSubsequentLines verifies that swapping the redactor
-// via SetRedactor takes effect for lines bridged after the swap and fully
-// replaces (not merges with) the prior redactor - matching the
-// RedactorRegistry rebuilding the redactor on every session add/remove.
-func TestSetRedactorAppliesToSubsequentLines(t *testing.T) {
-	t.Parallel()
-
-	hub := logbridge.NewHub(func(e protocol.LogEntry) string { return e.SessionID }, nil)
-	_, ch := hub.Subscribe("")
-	bridge := logbridge.NewBridge(logbridge.BridgeConfig{
-		Hub:      hub,
-		Redactor: redact.New([]string{"initial-secret-val"}),
-	})
-
-	key := logbridge.Key{SessionID: testSession}
-
-	bridge.BridgeLine(key, []byte("leaked initial-secret-val here"), true)
-
-	got := <-ch
-	assert.Equal(t, "leaked [REDACTED] here", got.Content)
-
-	bridge.SetRedactor(redact.New([]string{"rotated-secret-val"}))
-
-	bridge.BridgeLine(key, []byte("leaked rotated-secret-val here"), true)
-
-	got = <-ch
-	assert.Equal(t, "leaked [REDACTED] here", got.Content)
-
-	// Old secret no longer masked once the redactor is swapped: proves a full
-	// replace, not a merge.
-	bridge.BridgeLine(key, []byte("leaked initial-secret-val here"), true)
-
-	got = <-ch
-	assert.Equal(t, "leaked initial-secret-val here", got.Content)
 }

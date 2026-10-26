@@ -28,7 +28,7 @@ func (c *Core) Auth(next http.HandlerFunc) http.HandlerFunc {
 		// Reject oversized bodies up front: a declared Content-Length past the
 		// cap can never verify (we would truncate it), so a 413 is the honest
 		// answer rather than a 401.
-		if r.ContentLength > MaxRequestBodyBytes {
+		if r.ContentLength > maxRequestBodyBytes {
 			c.logger.Debug("auth: content-length exceeds cap",
 				"remote_addr", r.RemoteAddr, "content_length", r.ContentLength)
 			WriteError(w, http.StatusRequestEntityTooLarge, protocol.CodeTooLarge, "request body too large")
@@ -49,7 +49,7 @@ func (c *Core) Auth(next http.HandlerFunc) http.HandlerFunc {
 		// MaxBytesReader bounds the read AND, on overflow for streaming bodies
 		// without a declared Content-Length, makes the read error so we fail
 		// rather than silently truncate and mis-verify.
-		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxRequestBodyBytes))
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBodyBytes))
 		if err != nil {
 			c.logger.Debug("auth: body read failed", "remote_addr", r.RemoteAddr, "error", err)
 			WriteError(w, http.StatusRequestEntityTooLarge, protocol.CodeTooLarge, "request body too large")

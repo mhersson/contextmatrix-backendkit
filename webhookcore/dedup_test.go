@@ -42,6 +42,15 @@ func TestDedup_KeyedByBothFields(t *testing.T) {
 	assert.False(t, d.CheckAndRecord("scope-2", "m1"))
 }
 
+func TestDedup_BoundaryShiftIsDistinct(t *testing.T) {
+	d := NewDedupCache(time.Minute, 16)
+
+	assert.False(t, d.CheckAndRecord("ab", "c"))
+	assert.False(t, d.CheckAndRecord("a", "bc"))
+	assert.True(t, d.CheckAndRecord("ab", "c"))
+	assert.True(t, d.CheckAndRecord("a", "bc"))
+}
+
 func TestDedup_CapacityEvictsOldest(t *testing.T) {
 	d := NewDedupCache(time.Hour, 2)
 
