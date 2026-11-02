@@ -55,7 +55,12 @@ func NewResolver(cmURL, apiKey, cacheDir, endpointPath string) *Resolver {
 		apiKey:       apiKey,
 		cacheDir:     cacheDir,
 		endpointPath: endpointPath,
-		http:         &http.Client{Timeout: requestTimeout},
+		http: &http.Client{
+			Timeout: requestTimeout,
+			// Go does not strip the custom signature headers on redirect, so a
+			// followed redirect would forward them to any host.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
 	}
 	r.cloner = r.gitClone
 
@@ -142,7 +147,7 @@ func (r *Resolver) fetchPointer(ctx context.Context) (protocol.TaskSkillsSource,
 	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return protocol.TaskSkillsSource{}, fmt.Errorf("task-skills-source returned %d", resp.StatusCode)
 	}
 

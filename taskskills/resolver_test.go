@@ -63,6 +63,49 @@ func TestResolveFetchesPointerClonesAndCaches(t *testing.T) {
 	assert.Equal(t, int32(1), hits.Load(), "pointer fetched once; result cached")
 }
 
+func TestResolveRefusesRedirects(t *testing.T) {
+	const pointer = `{"git_remote_url":"https://example.test/skills.git","ref":"abc123","token":"tok"}`
+
+	var targetHits atomic.Int32
+
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetHits.Add(1)
+
+		_, _ = w.Write([]byte(pointer))
+	}))
+	defer target.Close()
+
+	var sigSeen atomic.Value
+
+	// Same hostname, different port: Go's own header stripping would not protect this hop.
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sigSeen.Store(r.Header.Get("X-Signature-256"))
+		w.Header().Set("Location", target.URL+r.URL.Path)
+		w.WriteHeader(http.StatusTemporaryRedirect)
+		_, _ = w.Write([]byte(pointer))
+	}))
+	defer redirector.Close()
+
+	var clones atomic.Int32
+
+	r := NewResolver(redirector.URL, "key", t.TempDir(), endpointPath)
+	r.cloner = func(context.Context, string, string, string, string) error {
+		clones.Add(1)
+
+		return nil
+	}
+
+	dir, err := r.Resolve(context.Background())
+	require.Error(t, err)
+	assert.Empty(t, dir)
+	assert.Zero(t, clones.Load(), "no clone from a redirected response")
+	assert.Zero(t, targetHits.Load(), "the redirect target must never be dialed")
+
+	sig, _ := sigSeen.Load().(string)
+	require.NotEmpty(t, sig)
+	assert.NotContains(t, err.Error(), sig)
+}
+
 func TestResolveEmptyPointerYieldsNoSkills(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"git_remote_url": "", "ref": ""})
