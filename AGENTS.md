@@ -68,8 +68,9 @@ make fmt && make test && make test-race && make lint && make deps-gate && make b
 Run the Verification set above before every commit.
 
 - **Never commit to `main`.** Work on a feature branch; tasks of a plan or
-  scope the user approved commit there without asking again. Never push
-  without explicit user approval.
+  scope the user approved commit there without asking again. Pushing a
+  feature branch and opening a PR need no approval; merging a PR, pushing
+  to `main` and pushing a tag each need explicit user approval.
 - Conventional commits: `type(scope): concise summary`. Always include a scope.
 - Body uses bullet points for the what and why - no long paragraphs.
 - Never reference plan phases, task numbers, or private card IDs in messages.
