@@ -252,7 +252,7 @@ func (b *Bridge) mapEvent(kind string, data map[string]any) (entry protocol.LogE
 		// An unknown reset time still publishes: the stop is real and must not
 		// be silent. Content is the fallback for consumers without UsageLimit.
 		limit := &protocol.UsageLimit{Window: strField(data, "window")}
-		if t, err := time.Parse(time.RFC3339, strField(data, "resets_at")); err == nil {
+		if t, err := time.Parse(time.RFC3339, strField(data, "resets_at")); err == nil && wireTime(t) {
 			limit.ResetsAt = t
 		}
 
@@ -390,7 +390,7 @@ func subscriptionField(data map[string]any) []protocol.SubscriptionUsage {
 		}
 
 		var w protocol.SubscriptionUsage
-		if err := json.Unmarshal(b, &w); err != nil || w.Window == "" || w.ResetsAt.IsZero() {
+		if err := json.Unmarshal(b, &w); err != nil || w.Window == "" || !wireTime(w.ResetsAt) {
 			continue
 		}
 
@@ -400,6 +400,18 @@ func subscriptionField(data map[string]any) []protocol.SubscriptionUsage {
 	slices.SortFunc(out, func(a, b protocol.SubscriptionUsage) int { return strings.Compare(a.Window, b.Window) })
 
 	return out
+}
+
+// wireTime reports whether t is set and marshals: the parsers accept offsets
+// such as +24:00 that MarshalJSON rejects, and the SSE handler then drops the frame.
+func wireTime(t time.Time) bool {
+	if t.IsZero() {
+		return false
+	}
+
+	_, err := t.MarshalJSON()
+
+	return err == nil
 }
 
 // summarizeData produces a brief human-readable string from event data for

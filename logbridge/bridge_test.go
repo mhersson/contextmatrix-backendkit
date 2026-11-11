@@ -305,6 +305,23 @@ func sharedRows() []mapRow {
 			wantUsage: &protocol.LogTokenUsage{InputTokens: 1, OutputTokens: 2, CostBasis: protocol.CostBasisSubscription},
 		},
 		{
+			name: "usage → a window whose reset cannot be marshalled is dropped, frame kept",
+			line: makeEvent("usage", map[string]any{
+				"prompt_tokens": float64(1), "completion_tokens": float64(2), "cost_basis": "subscription",
+				"subscription": []any{
+					map[string]any{"window": "five_hour", "utilization": 0.5, "resets_at": "2026-11-11T17:00:00+24:00"},
+					map[string]any{"window": "seven_day", "utilization": 0.13, "resets_at": "2026-11-18T07:00:00Z"},
+				},
+			}),
+			wantType: "usage", wantAwaiting: 0,
+			wantUsage: &protocol.LogTokenUsage{
+				InputTokens: 1, OutputTokens: 2, CostBasis: protocol.CostBasisSubscription,
+				Subscription: []protocol.SubscriptionUsage{
+					{Window: "seven_day", Utilization: 0.13, ResetsAt: time.Date(2026, 11, 18, 7, 0, 0, 0, time.UTC)},
+				},
+			},
+		},
+		{
 			name:     "usage_limit → system frame with window and reset",
 			line:     makeEvent("usage_limit", map[string]any{"window": "seven_day", "resets_at": "2026-11-18T07:00:00Z"}),
 			wantType: "system", wantAwaiting: 0,
@@ -316,6 +333,12 @@ func sharedRows() []mapRow {
 			line:     makeEvent("usage_limit", map[string]any{"resets_at": "soon"}),
 			wantType: "system", wantAwaiting: 0,
 			wantUsageLimit: &protocol.UsageLimit{},
+		},
+		{
+			name:     "usage_limit → a reset that cannot be marshalled is left out, frame kept",
+			line:     makeEvent("usage_limit", map[string]any{"window": "seven_day", "resets_at": "2026-11-18T07:00:00+24:00"}),
+			wantType: "system", wantAwaiting: 0,
+			wantUsageLimit: &protocol.UsageLimit{Window: "seven_day"},
 		},
 		{
 			name: "usage → compaction call cost is carried",
@@ -503,6 +526,10 @@ func assertCommon(t *testing.T, tt mapRow, got protocol.LogEntry) {
 
 	assert.Equal(t, tt.wantType, got.Type, "Type mismatch")
 	assert.False(t, got.Timestamp.IsZero(), "Timestamp must be set")
+
+	// The SSE handler drops a frame it cannot marshal.
+	_, err := json.Marshal(got)
+	require.NoError(t, err, "frame must marshal")
 
 	if tt.wantModel != "" {
 		assert.Equal(t, tt.wantModel, got.Model)
