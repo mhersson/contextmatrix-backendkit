@@ -76,6 +76,10 @@ the configured container URL with `ValidateContainerURL`. The worker's calls to
 proxy replaces it with the real bearer (none for a keyless upstream). The
 backend calls `Revoke(runKey)` on exit and on launch failure.
 
+`Register` refuses a `claude_code` endpoint: its subscription token is spent
+only by the claude binary and is never proxied, so a backend without the
+Claude Code executor fails the start instead of the first model call.
+
 ## Versioning policy
 
 backendkit follows the harness operating model, not protocol's: v0.x,

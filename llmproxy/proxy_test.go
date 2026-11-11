@@ -255,6 +255,15 @@ func TestRegisterRejectsBadBaseURL(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestRegisterRefusesClaudeCode(t *testing.T) {
+	p := newProxy(t, llmproxy.Config{})
+
+	tok, err := p.Register("run", protocol.LLMEndpoint{Type: protocol.LLMEndpointTypeClaudeCode, OAuthToken: "oauth-secret"})
+	require.Error(t, err)
+	assert.Empty(t, tok)
+	assert.NotContains(t, err.Error(), "oauth-secret")
+}
+
 func TestNewRejectsBadPrefix(t *testing.T) {
 	for _, prefix := range []string{"", "llm", "/llm/"} {
 		_, err := llmproxy.New(llmproxy.Config{Prefix: prefix})
