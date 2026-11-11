@@ -296,6 +296,15 @@ func sharedRows() []mapRow {
 			wantUsage: &protocol.LogTokenUsage{InputTokens: 1, OutputTokens: 2, CostUSD: 0.5},
 		},
 		{
+			name: "usage → a subscription array with no cost_basis key is ignored",
+			line: makeEvent("usage", map[string]any{
+				"prompt_tokens": float64(1), "completion_tokens": float64(2), "cost_usd": float64(0.5),
+				"subscription": []any{map[string]any{"window": "seven_day", "utilization": 0.1, "resets_at": "2026-11-18T07:00:00Z"}},
+			}),
+			wantType: "usage", wantAwaiting: 0,
+			wantUsage: &protocol.LogTokenUsage{InputTokens: 1, OutputTokens: 2, CostUSD: 0.5},
+		},
+		{
 			name: "usage → subscription of the wrong JSON type is dropped, frame kept",
 			line: makeEvent("usage", map[string]any{
 				"prompt_tokens": float64(1), "completion_tokens": float64(2),
@@ -333,6 +342,12 @@ func sharedRows() []mapRow {
 			line:     makeEvent("usage_limit", map[string]any{"resets_at": "soon"}),
 			wantType: "system", wantAwaiting: 0,
 			wantUsageLimit: &protocol.UsageLimit{},
+		},
+		{
+			name:     "usage_limit → frame published with no resets_at key",
+			line:     makeEvent("usage_limit", map[string]any{"window": "five_hour"}),
+			wantType: "system", wantAwaiting: 0,
+			wantUsageLimit: &protocol.UsageLimit{Window: "five_hour"},
 		},
 		{
 			name:     "usage_limit → a reset that cannot be marshalled is left out, frame kept",
@@ -542,11 +557,15 @@ func assertCommon(t *testing.T, tt mapRow, got protocol.LogEntry) {
 	if tt.wantUsage != nil {
 		require.NotNil(t, got.Usage)
 		assert.Equal(t, *tt.wantUsage, *got.Usage)
+	} else {
+		assert.Nil(t, got.Usage, "only a usage frame carries Usage")
 	}
 
 	if tt.wantUsageLimit != nil {
 		require.NotNil(t, got.UsageLimit)
 		assert.Equal(t, *tt.wantUsageLimit, *got.UsageLimit)
+	} else {
+		assert.Nil(t, got.UsageLimit, "only a usage-limit frame carries UsageLimit")
 	}
 
 	if tt.checkContent != nil {
