@@ -248,6 +248,29 @@ func (b *Bridge) mapEvent(kind string, data map[string]any) (entry protocol.LogE
 			Content: summarizeData(data),
 		}, false, false
 
+	case "usage_limit":
+		// An unknown reset time still publishes: the stop is real and must not
+		// be silent. Content is the fallback for consumers without UsageLimit.
+		limit := &protocol.UsageLimit{Window: strField(data, "window")}
+		if t, err := time.Parse(time.RFC3339, strField(data, "resets_at")); err == nil {
+			limit.ResetsAt = t
+		}
+
+		content := "subscription usage limit reached"
+		if limit.Window != "" {
+			content += " (" + limit.Window + ")"
+		}
+
+		if !limit.ResetsAt.IsZero() {
+			content += "; resets at " + limit.ResetsAt.UTC().Format(time.RFC3339)
+		}
+
+		return protocol.LogEntry{
+			Type:       "system",
+			Content:    content,
+			UsageLimit: limit,
+		}, false, false
+
 	case "error":
 		content := strField(data, "error")
 		if defect := strField(data, "suspected_upstream_defect"); defect != "" {

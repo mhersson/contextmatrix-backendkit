@@ -43,7 +43,7 @@ instead of growing this list.
 | `taskskills` | The signed-GET task-skills pointer fetch and shallow git clone shared by agent's and chat's worker provisioning. |
 | `frames` | The JSON Lines control-frame codec written to a worker container's stdin and read back by the work command, with the accepted frame-type set injected per backend. |
 | `metrics` | The common Prometheus registry bundle (go/process collectors plus the shared HTTP metrics) built from a per-backend namespace so each backend gets its own metric names. |
-| `logbridge` | The fan-out hub and harness-event-to-`protocol.LogEntry` classifier that streams worker output to the UI. A backend can retain a per-key backlog so entries published before its consumer connects are replayed to it. |
+| `logbridge` | The fan-out hub and harness-event-to-`protocol.LogEntry` classifier that streams worker output to the UI; a subscription usage-limit event becomes a `system` frame carrying a `usage_limit` payload. A backend can retain a per-key backlog so entries published before its consumer connects are replayed to it. |
 | `llmproxy` | The per-run LLM proxy: a stand-in token registry and a reverse proxy that swaps in the real bearer, so workers never hold the LLM key; plus `ValidateContainerURL` and `WorkerBaseURL` for the worker-facing base URL. |
 
 ## llmproxy

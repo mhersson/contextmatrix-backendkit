@@ -66,6 +66,8 @@ type mapRow struct {
 	wantModel  string
 	wantToolID string
 	wantUsage  *protocol.LogTokenUsage
+	// wantUsageLimit, when set, is the expected usage-limit payload.
+	wantUsageLimit *protocol.UsageLimit
 	// awaiting expected value (-1 = not fired, 0 = false, 1 = true); agent
 	// mode only.
 	wantAwaiting int
@@ -303,6 +305,19 @@ func sharedRows() []mapRow {
 			wantUsage: &protocol.LogTokenUsage{InputTokens: 1, OutputTokens: 2, CostBasis: protocol.CostBasisSubscription},
 		},
 		{
+			name:     "usage_limit → system frame with window and reset",
+			line:     makeEvent("usage_limit", map[string]any{"window": "seven_day", "resets_at": "2026-11-18T07:00:00Z"}),
+			wantType: "system", wantAwaiting: 0,
+			wantUsageLimit: &protocol.UsageLimit{Window: "seven_day", ResetsAt: time.Date(2026, 11, 18, 7, 0, 0, 0, time.UTC)},
+			checkContent:   func(t *testing.T, content string) { t.Helper(); assert.NotEmpty(t, content) },
+		},
+		{
+			name:     "usage_limit → frame still published without a reset time",
+			line:     makeEvent("usage_limit", map[string]any{"resets_at": "soon"}),
+			wantType: "system", wantAwaiting: 0,
+			wantUsageLimit: &protocol.UsageLimit{},
+		},
+		{
 			name: "usage → compaction call cost is carried",
 			line: makeEvent("usage", map[string]any{
 				"phase":             "compaction",
@@ -500,6 +515,11 @@ func assertCommon(t *testing.T, tt mapRow, got protocol.LogEntry) {
 	if tt.wantUsage != nil {
 		require.NotNil(t, got.Usage)
 		assert.Equal(t, *tt.wantUsage, *got.Usage)
+	}
+
+	if tt.wantUsageLimit != nil {
+		require.NotNil(t, got.UsageLimit)
+		assert.Equal(t, *tt.wantUsageLimit, *got.UsageLimit)
 	}
 
 	if tt.checkContent != nil {
