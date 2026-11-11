@@ -7,6 +7,7 @@ package logbridge
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -197,16 +198,26 @@ func (b *Bridge) mapEvent(kind string, data map[string]any) (entry protocol.LogE
 		// none, so the consumer prices the call itself.
 		costUSD := positiveFloatField(data, "cost_usd")
 
+		usage := &protocol.LogTokenUsage{
+			InputTokens:       inputTokens,
+			OutputTokens:      outputTokens,
+			CacheReadTokens:   cacheReadTokens,
+			CacheCreateTokens: cacheCreateTokens,
+			CostUSD:           costUSD,
+		}
+
+		// A subscription frame never carries cost, even if a producer sent one:
+		// CM would record it as billed spend instead of an API-equivalent estimate.
+		if strField(data, "cost_basis") == protocol.CostBasisSubscription {
+			usage.CostBasis = protocol.CostBasisSubscription
+			usage.CostUSD = 0
+			usage.Subscription = subscriptionField(data)
+		}
+
 		return protocol.LogEntry{
 			Type:  "usage",
 			Model: strField(data, "model"),
-			Usage: &protocol.LogTokenUsage{
-				InputTokens:       inputTokens,
-				OutputTokens:      outputTokens,
-				CacheReadTokens:   cacheReadTokens,
-				CacheCreateTokens: cacheCreateTokens,
-				CostUSD:           costUSD,
-			},
+			Usage: usage,
 		}, false, false
 
 	case "state_change":
@@ -235,6 +246,29 @@ func (b *Bridge) mapEvent(kind string, data map[string]any) (entry protocol.LogE
 		return protocol.LogEntry{
 			Type:    "system",
 			Content: summarizeData(data),
+		}, false, false
+
+	case "usage_limit":
+		// An unknown reset time still publishes: the stop is real and must not
+		// be silent. Content is the fallback for consumers without UsageLimit.
+		limit := &protocol.UsageLimit{Window: strField(data, "window")}
+		if t, err := time.Parse(time.RFC3339, strField(data, "resets_at")); err == nil && wireTime(t) {
+			limit.ResetsAt = t
+		}
+
+		content := "subscription usage limit reached"
+		if limit.Window != "" {
+			content += " (" + limit.Window + ")"
+		}
+
+		if !limit.ResetsAt.IsZero() {
+			content += "; resets at " + limit.ResetsAt.UTC().Format(time.RFC3339)
+		}
+
+		return protocol.LogEntry{
+			Type:       "system",
+			Content:    content,
+			UsageLimit: limit,
 		}, false, false
 
 	case "error":
@@ -336,6 +370,48 @@ func positiveFloatField(data map[string]any, key string) float64 {
 	}
 
 	return 0
+}
+
+// subscriptionField decodes the subscription windows element by element,
+// dropping any that fails to decode or lacks a window or reset time, so one bad
+// window never costs the frame. Sorted by window; nil when none survive.
+func subscriptionField(data map[string]any) []protocol.SubscriptionUsage {
+	raw, ok := data["subscription"].([]any)
+	if !ok {
+		return nil
+	}
+
+	var out []protocol.SubscriptionUsage
+
+	for _, el := range raw {
+		b, err := json.Marshal(el)
+		if err != nil {
+			continue
+		}
+
+		var w protocol.SubscriptionUsage
+		if err := json.Unmarshal(b, &w); err != nil || w.Window == "" || !wireTime(w.ResetsAt) {
+			continue
+		}
+
+		out = append(out, w)
+	}
+
+	slices.SortFunc(out, func(a, b protocol.SubscriptionUsage) int { return strings.Compare(a.Window, b.Window) })
+
+	return out
+}
+
+// wireTime reports whether t is set and marshals: the parsers accept offsets
+// such as +24:00 that MarshalJSON rejects, and the SSE handler then drops the frame.
+func wireTime(t time.Time) bool {
+	if t.IsZero() {
+		return false
+	}
+
+	_, err := t.MarshalJSON()
+
+	return err == nil
 }
 
 // summarizeData produces a brief human-readable string from event data for

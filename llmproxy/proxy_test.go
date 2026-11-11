@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -255,6 +256,15 @@ func TestRegisterRejectsBadBaseURL(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestRegisterRefusesClaudeCode(t *testing.T) {
+	p := newProxy(t, llmproxy.Config{})
+
+	tok, err := p.Register("run", protocol.LLMEndpoint{Type: protocol.LLMEndpointTypeClaudeCode, OAuthToken: "oauth-secret"})
+	require.Error(t, err)
+	assert.Empty(t, tok)
+	assert.NotContains(t, err.Error(), "oauth-secret")
+}
+
 func TestNewRejectsBadPrefix(t *testing.T) {
 	for _, prefix := range []string{"", "llm", "/llm/"} {
 		_, err := llmproxy.New(llmproxy.Config{Prefix: prefix})
@@ -283,8 +293,11 @@ func TestMountedMetricsLabel(t *testing.T) {
 	resp := call(t, srv.URL, http.MethodPost, "/llm/chat/completions", tok, strings.NewReader("{}"))
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	got := testutil.ToFloat64(m.WebhookRequestsTotal.WithLabelValues("llm/chat/completions", "200", "success"))
-	assert.InEpsilon(t, float64(1), got, 1e-9)
+	// The middleware counts after the handler returns, which can be after the
+	// client already has the response.
+	counter := m.WebhookRequestsTotal.WithLabelValues("llm/chat/completions", "200", "success")
+
+	require.Eventually(t, func() bool { return testutil.ToFloat64(counter) == 1 }, 2*time.Second, 10*time.Millisecond)
 }
 
 func TestCACertFileTrustsPrivateUpstream(t *testing.T) {
@@ -328,15 +341,19 @@ func TestNewRejectsBadCACertFile(t *testing.T) {
 }
 
 func TestDialFailureIs502(t *testing.T) {
+	p := newProxy(t, llmproxy.Config{})
+	// Start the proxy before closing the upstream: a listener opened after the
+	// close can be handed the freed port, and the proxy would dial itself.
+	srv := serve(t, p)
+
 	up := httptest.NewServer(http.NotFoundHandler())
 	base := up.URL
 	up.Close()
 
-	p := newProxy(t, llmproxy.Config{})
 	tok, err := p.Register("run", protocol.LLMEndpoint{Type: "openai", BaseURL: base})
 	require.NoError(t, err)
 
-	resp := call(t, serve(t, p).URL, http.MethodGet, "/llm/models", tok, nil)
+	resp := call(t, srv.URL, http.MethodGet, "/llm/models", tok, nil)
 	assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
 }
 
@@ -440,6 +457,93 @@ func TestSSEFlushAndKeepalive(t *testing.T) {
 	assert.Equal(t, ": keepalive", nextLine(t, lines, 2*time.Second))
 	assert.Empty(t, nextLine(t, lines, 2*time.Second))
 	assert.JSONEq(t, `{"x":1}`, strings.TrimPrefix(nextLine(t, lines, 2*time.Second), "data: "))
+}
+
+// The request body can still be in flight when the upstream starts its
+// response. Here the worker sends it only after the first streamed line, so a
+// proxy that gives up the request body once its response begins never streams.
+func TestRequestBodyForwardedAfterResponseStarts(t *testing.T) {
+	hold := newGate()
+	gotBody := make(chan string, 1)
+
+	var calls atomic.Int32
+
+	up := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Another process can dial a freed port this server now holds; only the
+		// proxy sends the registered key.
+		if r.Header.Get("Authorization") != "Bearer body-key" {
+			http.NotFound(w, r)
+
+			return
+		}
+
+		calls.Add(1)
+		assert.NoError(t, http.NewResponseController(w).EnableFullDuplex())
+		assert.Equal(t, int64(2), r.ContentLength)
+		w.Header().Set("Content-Type", "text/event-stream")
+
+		_, _ = io.WriteString(w, ": keepalive\n\n")
+
+		w.(http.Flusher).Flush()
+
+		b, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+
+		// A second proxied request must fail the test, not wedge the server's Close.
+		select {
+		case gotBody <- string(b):
+		default:
+		}
+
+		_, _ = io.WriteString(w, "data: {\"x\":1}\n\n")
+
+		w.(http.Flusher).Flush()
+
+		select {
+		case <-hold.ch:
+		case <-r.Context().Done():
+		}
+	}))
+
+	p := newProxy(t, llmproxy.Config{})
+	tok, err := p.Register("run", protocol.LLMEndpoint{Type: "openai", BaseURL: up.URL, APIKey: "body-key"})
+	require.NoError(t, err)
+
+	srv, _ := mounted(t, p)
+	t.Cleanup(hold.open)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+
+	// The client's Do waits for its body writer, so a stalled proxy must not
+	// leave the pipe open past the deadline.
+	pr, pw := io.Pipe()
+	stop := context.AfterFunc(ctx, func() { pw.CloseWithError(ctx.Err()) })
+
+	t.Cleanup(func() { stop(); _ = pw.Close() })
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/llm/chat/completions", pr)
+	require.NoError(t, err)
+
+	req.ContentLength = 2
+	req.Header.Set("Authorization", "Bearer "+tok)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+
+	lines := lineReader(resp)
+
+	assert.Equal(t, ": keepalive", nextLine(t, lines, 2*time.Second))
+
+	_, err = io.WriteString(pw, "{}")
+	require.NoError(t, err)
+	require.NoError(t, pw.Close())
+
+	assert.Empty(t, nextLine(t, lines, 2*time.Second))
+	assert.JSONEq(t, `{"x":1}`, strings.TrimPrefix(nextLine(t, lines, 2*time.Second), "data: "))
+	assert.Equal(t, "{}", <-gotBody)
+	assert.Equal(t, int32(1), calls.Load(), "upstream requests")
 }
 
 func TestBodiesByteIdentical(t *testing.T) {

@@ -28,6 +28,11 @@ type registry struct {
 // Register stores the upstream for runKey and returns a fresh token, replacing
 // any token the key held before.
 func (p *Proxy) Register(runKey string, up protocol.LLMEndpoint) (string, error) {
+	// The subscription token is spent only by the claude binary, never forwarded.
+	if up.Type == protocol.LLMEndpointTypeClaudeCode {
+		return "", fmt.Errorf("llmproxy: endpoint type %q is not proxied", up.Type)
+	}
+
 	base := up.BaseURL
 	if base == "" {
 		base = defaultBaseURL
