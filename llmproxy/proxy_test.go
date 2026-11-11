@@ -340,15 +340,19 @@ func TestNewRejectsBadCACertFile(t *testing.T) {
 }
 
 func TestDialFailureIs502(t *testing.T) {
+	p := newProxy(t, llmproxy.Config{})
+	// Start the proxy before closing the upstream: a listener opened after the
+	// close can be handed the freed port, and the proxy would dial itself.
+	srv := serve(t, p)
+
 	up := httptest.NewServer(http.NotFoundHandler())
 	base := up.URL
 	up.Close()
 
-	p := newProxy(t, llmproxy.Config{})
 	tok, err := p.Register("run", protocol.LLMEndpoint{Type: "openai", BaseURL: base})
 	require.NoError(t, err)
 
-	resp := call(t, serve(t, p).URL, http.MethodGet, "/llm/models", tok, nil)
+	resp := call(t, srv.URL, http.MethodGet, "/llm/models", tok, nil)
 	assert.Equal(t, http.StatusBadGateway, resp.StatusCode)
 }
 
