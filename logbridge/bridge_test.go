@@ -259,6 +259,50 @@ func sharedRows() []mapRow {
 			},
 		},
 		{
+			name: "usage → subscription basis and windows are carried, cost is forced to 0",
+			line: makeEvent("usage", map[string]any{
+				"prompt_tokens": float64(4), "completion_tokens": float64(125),
+				"cache_read_tokens": float64(3844), "cache_creation_tokens": float64(3977),
+				"cost_usd": float64(0.0175), "model": "claude-sonnet-5-5",
+				"cost_basis": "subscription",
+				"subscription": []any{
+					map[string]any{"window": "seven_day", "utilization": 0.13, "status": "allowed", "resets_at": "2026-11-18T07:00:00Z"},
+					map[string]any{"window": "five_hour", "utilization": 0.5, "resets_at": "2026-11-11T17:00:00Z"},
+					map[string]any{"window": "", "utilization": 0.1, "resets_at": "2026-11-11T17:00:00Z"},
+					map[string]any{"window": "bad", "utilization": 0.1, "resets_at": "tomorrow"},
+					map[string]any{"window": "no_reset", "utilization": 0.1},
+					"seven_day",
+				},
+			}),
+			wantType: "usage", wantModel: "claude-sonnet-5-5", wantAwaiting: 0,
+			wantUsage: &protocol.LogTokenUsage{
+				InputTokens: 4, OutputTokens: 125, CacheReadTokens: 3844, CacheCreateTokens: 3977,
+				CostBasis: protocol.CostBasisSubscription,
+				Subscription: []protocol.SubscriptionUsage{ // sorted by window
+					{Window: "five_hour", Utilization: 0.5, ResetsAt: time.Date(2026, 11, 11, 17, 0, 0, 0, time.UTC)},
+					{Window: "seven_day", Utilization: 0.13, Status: "allowed", ResetsAt: time.Date(2026, 11, 18, 7, 0, 0, 0, time.UTC)},
+				},
+			},
+		},
+		{
+			name: "usage → unknown cost_basis and a subscription array on a metered event are ignored",
+			line: makeEvent("usage", map[string]any{
+				"prompt_tokens": float64(1), "completion_tokens": float64(2), "cost_usd": float64(0.5),
+				"cost_basis": "flat", "subscription": []any{map[string]any{"window": "seven_day", "utilization": 0.1, "resets_at": "2026-11-18T07:00:00Z"}},
+			}),
+			wantType: "usage", wantAwaiting: 0,
+			wantUsage: &protocol.LogTokenUsage{InputTokens: 1, OutputTokens: 2, CostUSD: 0.5},
+		},
+		{
+			name: "usage → subscription of the wrong JSON type is dropped, frame kept",
+			line: makeEvent("usage", map[string]any{
+				"prompt_tokens": float64(1), "completion_tokens": float64(2),
+				"cost_basis": "subscription", "subscription": "seven_day",
+			}),
+			wantType: "usage", wantAwaiting: 0,
+			wantUsage: &protocol.LogTokenUsage{InputTokens: 1, OutputTokens: 2, CostBasis: protocol.CostBasisSubscription},
+		},
+		{
 			name: "usage → compaction call cost is carried",
 			line: makeEvent("usage", map[string]any{
 				"phase":             "compaction",

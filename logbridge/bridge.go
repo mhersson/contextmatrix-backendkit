@@ -7,6 +7,7 @@ package logbridge
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -197,16 +198,26 @@ func (b *Bridge) mapEvent(kind string, data map[string]any) (entry protocol.LogE
 		// none, so the consumer prices the call itself.
 		costUSD := positiveFloatField(data, "cost_usd")
 
+		usage := &protocol.LogTokenUsage{
+			InputTokens:       inputTokens,
+			OutputTokens:      outputTokens,
+			CacheReadTokens:   cacheReadTokens,
+			CacheCreateTokens: cacheCreateTokens,
+			CostUSD:           costUSD,
+		}
+
+		// A subscription frame never carries cost, even if a producer sent one:
+		// CM would record it as billed spend instead of an API-equivalent estimate.
+		if strField(data, "cost_basis") == protocol.CostBasisSubscription {
+			usage.CostBasis = protocol.CostBasisSubscription
+			usage.CostUSD = 0
+			usage.Subscription = subscriptionField(data)
+		}
+
 		return protocol.LogEntry{
 			Type:  "usage",
 			Model: strField(data, "model"),
-			Usage: &protocol.LogTokenUsage{
-				InputTokens:       inputTokens,
-				OutputTokens:      outputTokens,
-				CacheReadTokens:   cacheReadTokens,
-				CacheCreateTokens: cacheCreateTokens,
-				CostUSD:           costUSD,
-			},
+			Usage: usage,
 		}, false, false
 
 	case "state_change":
@@ -336,6 +347,36 @@ func positiveFloatField(data map[string]any, key string) float64 {
 	}
 
 	return 0
+}
+
+// subscriptionField decodes the subscription windows element by element,
+// dropping any that fails to decode or lacks a window or reset time, so one bad
+// window never costs the frame. Sorted by window; nil when none survive.
+func subscriptionField(data map[string]any) []protocol.SubscriptionUsage {
+	raw, ok := data["subscription"].([]any)
+	if !ok {
+		return nil
+	}
+
+	var out []protocol.SubscriptionUsage
+
+	for _, el := range raw {
+		b, err := json.Marshal(el)
+		if err != nil {
+			continue
+		}
+
+		var w protocol.SubscriptionUsage
+		if err := json.Unmarshal(b, &w); err != nil || w.Window == "" || w.ResetsAt.IsZero() {
+			continue
+		}
+
+		out = append(out, w)
+	}
+
+	slices.SortFunc(out, func(a, b protocol.SubscriptionUsage) int { return strings.Compare(a.Window, b.Window) })
+
+	return out
 }
 
 // summarizeData produces a brief human-readable string from event data for
