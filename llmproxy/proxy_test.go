@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -464,16 +465,31 @@ func TestSSEFlushAndKeepalive(t *testing.T) {
 func TestRequestBodyForwardedAfterResponseStarts(t *testing.T) {
 	hold := newGate()
 	gotBody := make(chan string, 1)
+
+	var calls atomic.Int32
+
 	up := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Another process can dial a freed port this server now holds; only the
+		// proxy sends the registered key.
+		if r.Header.Get("Authorization") != "Bearer body-key" {
+			http.NotFound(w, r)
+
+			return
+		}
+
+		calls.Add(1)
 		assert.NoError(t, http.NewResponseController(w).EnableFullDuplex())
+		assert.Equal(t, int64(2), r.ContentLength)
 		w.Header().Set("Content-Type", "text/event-stream")
 
 		_, _ = io.WriteString(w, ": keepalive\n\n")
 
 		w.(http.Flusher).Flush()
 
-		// A stray second request must fail the test, not wedge the server's Close.
-		b, _ := io.ReadAll(r.Body)
+		b, err := io.ReadAll(r.Body)
+		assert.NoError(t, err)
+
+		// A second proxied request must fail the test, not wedge the server's Close.
 		select {
 		case gotBody <- string(b):
 		default:
@@ -490,7 +506,7 @@ func TestRequestBodyForwardedAfterResponseStarts(t *testing.T) {
 	}))
 
 	p := newProxy(t, llmproxy.Config{})
-	tok, err := p.Register("run", protocol.LLMEndpoint{Type: "openai", BaseURL: up.URL})
+	tok, err := p.Register("run", protocol.LLMEndpoint{Type: "openai", BaseURL: up.URL, APIKey: "body-key"})
 	require.NoError(t, err)
 
 	srv, _ := mounted(t, p)
@@ -527,6 +543,7 @@ func TestRequestBodyForwardedAfterResponseStarts(t *testing.T) {
 	assert.Empty(t, nextLine(t, lines, 2*time.Second))
 	assert.JSONEq(t, `{"x":1}`, strings.TrimPrefix(nextLine(t, lines, 2*time.Second), "data: "))
 	assert.Equal(t, "{}", <-gotBody)
+	assert.Equal(t, int32(1), calls.Load(), "upstream requests")
 }
 
 func TestBodiesByteIdentical(t *testing.T) {
