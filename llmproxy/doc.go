@@ -27,7 +27,8 @@
 //   - Give the worker the token and [WorkerBaseURL] as its LLM base URL, and check
 //     the backend's container URL config with [ValidateContainerURL].
 //   - Mount prefix+"/" wrapped only in RecordMetrics, outside Auth and
-//     DrainGate, and put [Paths] on the metrics allowlist.
+//     DrainGate, and put [Paths] on the metrics allowlist. A wrapper must keep
+//     Unwrap, so the proxy can put an HTTP/1 request in full duplex.
 //   - Revoke on container exit and on launch failure.
 //
 // Config.CACertFile adds a PEM bundle to the system roots for upstream TLS, and

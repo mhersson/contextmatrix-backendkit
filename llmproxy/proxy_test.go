@@ -454,6 +454,77 @@ func TestSSEFlushAndKeepalive(t *testing.T) {
 	assert.JSONEq(t, `{"x":1}`, strings.TrimPrefix(nextLine(t, lines, 2*time.Second), "data: "))
 }
 
+// The request body can still be in flight when the upstream starts its
+// response. Here the worker sends it only after the first streamed line, so a
+// proxy that gives up the request body once its response begins never streams.
+func TestRequestBodyForwardedAfterResponseStarts(t *testing.T) {
+	hold := newGate()
+	gotBody := make(chan string, 1)
+	up := serve(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.NoError(t, http.NewResponseController(w).EnableFullDuplex())
+		w.Header().Set("Content-Type", "text/event-stream")
+
+		_, _ = io.WriteString(w, ": keepalive\n\n")
+
+		w.(http.Flusher).Flush()
+
+		// A stray second request must fail the test, not wedge the server's Close.
+		b, _ := io.ReadAll(r.Body)
+		select {
+		case gotBody <- string(b):
+		default:
+		}
+
+		_, _ = io.WriteString(w, "data: {\"x\":1}\n\n")
+
+		w.(http.Flusher).Flush()
+
+		select {
+		case <-hold.ch:
+		case <-r.Context().Done():
+		}
+	}))
+
+	p := newProxy(t, llmproxy.Config{})
+	tok, err := p.Register("run", protocol.LLMEndpoint{Type: "openai", BaseURL: up.URL})
+	require.NoError(t, err)
+
+	srv, _ := mounted(t, p)
+	t.Cleanup(hold.open)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+
+	// The client's Do waits for its body writer, so a stalled proxy must not
+	// leave the pipe open past the deadline.
+	pr, pw := io.Pipe()
+	stop := context.AfterFunc(ctx, func() { pw.CloseWithError(ctx.Err()) })
+
+	t.Cleanup(func() { stop(); _ = pw.Close() })
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, srv.URL+"/llm/chat/completions", pr)
+	require.NoError(t, err)
+
+	req.ContentLength = 2
+	req.Header.Set("Authorization", "Bearer "+tok)
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+
+	lines := lineReader(resp)
+
+	assert.Equal(t, ": keepalive", nextLine(t, lines, 2*time.Second))
+
+	_, err = io.WriteString(pw, "{}")
+	require.NoError(t, err)
+	require.NoError(t, pw.Close())
+
+	assert.Empty(t, nextLine(t, lines, 2*time.Second))
+	assert.JSONEq(t, `{"x":1}`, strings.TrimPrefix(nextLine(t, lines, 2*time.Second), "data: "))
+	assert.Equal(t, "{}", <-gotBody)
+}
+
 func TestBodiesByteIdentical(t *testing.T) {
 	const respBody = `{ "usage" :{"prompt_tokens":10,"completion_tokens":5,"cost":0.000123456789} ,"id":"gen-1",  "choices":[ ]}`
 

@@ -130,6 +130,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The transport can still be reading the request body when the upstream's
+	// response starts. Without full duplex the HTTP/1 server closes that body
+	// at the first response write, the transport drops the upstream connection
+	// and the stream is cut. HTTP/2 is always full duplex, so an error is moot.
+	_ = http.NewResponseController(w).EnableFullDuplex()
+
 	p.rp.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, e)))
 }
 
