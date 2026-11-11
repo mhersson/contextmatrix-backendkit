@@ -283,8 +283,11 @@ func TestMountedMetricsLabel(t *testing.T) {
 	resp := call(t, srv.URL, http.MethodPost, "/llm/chat/completions", tok, strings.NewReader("{}"))
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	got := testutil.ToFloat64(m.WebhookRequestsTotal.WithLabelValues("llm/chat/completions", "200", "success"))
-	assert.InEpsilon(t, float64(1), got, 1e-9)
+	// The middleware counts after the handler returns, which can be after the
+	// client already has the response.
+	counter := m.WebhookRequestsTotal.WithLabelValues("llm/chat/completions", "200", "success")
+
+	require.Eventually(t, func() bool { return testutil.ToFloat64(counter) == 1 }, 2*time.Second, 10*time.Millisecond)
 }
 
 func TestCACertFileTrustsPrivateUpstream(t *testing.T) {
